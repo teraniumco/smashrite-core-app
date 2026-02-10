@@ -5,9 +5,10 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'core/config/router_config.dart';
 import 'core/theme/app_theme.dart';
 import 'core/services/security_service.dart';
-import 'core/services/security_globals.dart'; // Import global state
+import 'core/services/security_globals.dart';
 import 'core/storage/storage_service.dart';
 import 'package:smashrite/features/exam/data/services/exam_storage_service.dart';
+import 'core/services/kiosk_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,6 +35,9 @@ void main() async {
     debugPrint('[!! WARNING !!] Security Service initialization failed: $e');
     // App can still run, but security features will be limited
   }
+
+  await KioskService.initialize();
+  debugPrint('✅ Kiosk service initialized');
 
   // Set preferred orientations (portrait only for exams)
   await SystemChrome.setPreferredOrientations([

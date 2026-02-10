@@ -57,5 +57,12 @@
 		<array>
 			<string>_smashrite._udp</string>
 		</array>
+		<key>UIRequiresFullScreen</key>
+		<true/>
+		<key>LSApplicationQueriesSchemes</key>
+		<array>
+			<string>itms-apps</string>
+			<string>https</string>
+		</array>
 	</dict>
 </plist>

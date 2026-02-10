@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart' as package_info;
 import 'package:smashrite/core/network/network_service.dart';
 import 'package:smashrite/core/theme/app_theme.dart';
 import 'package:smashrite/features/server_connection/data/models/exam_server.dart';
 import 'package:smashrite/features/server_connection/data/services/server_connection_service.dart';
+import 'package:smashrite/core/services/version_check_service.dart';
 
 class ManualEntryScreen extends StatefulWidget {
   const ManualEntryScreen({super.key});
@@ -29,6 +31,7 @@ class _ManualEntryScreenState extends State<ManualEntryScreen> {
     _authCodeController.dispose();
     super.dispose();
   }
+
 
   Future<void> _testConnection() async {
     if (!_formKey.currentState!.validate()) return;
@@ -61,8 +64,7 @@ class _ManualEntryScreenState extends State<ManualEntryScreen> {
           name: result['server_name'] ?? server.name,
           institutionName: result['institution_name'],
           institutionLogoUrl: result['institution_logo_url'],
-          primaryColor: result['primary_color'],
-          secondaryColor: result['secondary_color'],
+          requiredAppVersion: result['required_app_version'],
         );
 
         // Save server details
@@ -79,10 +81,20 @@ class _ManualEntryScreenState extends State<ManualEntryScreen> {
           ),
         );
         
-        // Navigate to login
+        // Check if version update is required
+        final requiredVersion = result['required_app_version'] ?? '1.0.0';
+        final needsUpdate = await VersionCheckService.shouldShowVersionCheck(
+          requiredVersion,
+        );
+        
         await Future.delayed(const Duration(milliseconds: 500));
         if (!mounted) return;
-        context.go('/login');
+        
+        if (needsUpdate) {
+          context.go('/app-version-check', extra: requiredVersion);
+        } else {
+          context.go('/login');
+        }
       } else {
         _showError(result['message'] ?? 'Connection failed. Please check your details.');
       }

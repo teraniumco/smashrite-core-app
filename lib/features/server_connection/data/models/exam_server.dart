@@ -7,12 +7,11 @@ class ExamServer extends Equatable {
   final int port;
   final int? signalStrength; // For auto-discovered servers
   final String? authCode; // 6-digit authentication code
+  final String? requiredAppVersion; // 
   
   // Institution branding
   final String? institutionName;
   final String? institutionLogoUrl;
-  final String? primaryColor;
-  final String? secondaryColor;
 
   const ExamServer({
     required this.name,
@@ -20,10 +19,9 @@ class ExamServer extends Equatable {
     required this.port,
     this.signalStrength,
     this.authCode,
+    this.requiredAppVersion,
     this.institutionName,
     this.institutionLogoUrl,
-    this.primaryColor,
-    this.secondaryColor,
   });
 
   /// Full server URL
@@ -39,10 +37,9 @@ class ExamServer extends Equatable {
     int? port,
     int? signalStrength,
     String? authCode,
+    String? requiredAppVersion,
     String? institutionName,
     String? institutionLogoUrl,
-    String? primaryColor,
-    String? secondaryColor,
   }) {
     return ExamServer(
       name: name ?? this.name,
@@ -50,10 +47,9 @@ class ExamServer extends Equatable {
       port: port ?? this.port,
       signalStrength: signalStrength ?? this.signalStrength,
       authCode: authCode ?? this.authCode,
+      requiredAppVersion: requiredAppVersion ?? this.requiredAppVersion,
       institutionName: institutionName ?? this.institutionName,
       institutionLogoUrl: institutionLogoUrl ?? this.institutionLogoUrl,
-      primaryColor: primaryColor ?? this.primaryColor,
-      secondaryColor: secondaryColor ?? this.secondaryColor,
     );
   }
 
@@ -65,10 +61,9 @@ class ExamServer extends Equatable {
       'port': port,
       'signalStrength': signalStrength,
       'authCode': authCode,
+      'requiredAppVersion': requiredAppVersion,
       'institutionName': institutionName,
       'institutionLogoUrl': institutionLogoUrl,
-      'primaryColor': primaryColor,
-      'secondaryColor': secondaryColor,
     };
   }
 
@@ -80,10 +75,9 @@ class ExamServer extends Equatable {
       port: json['port'] as int,
       signalStrength: json['signalStrength'] as int?,
       authCode: json['authCode'] as String?,
+      requiredAppVersion: json['requiredAppVersion'] as String?,
       institutionName: json['institutionName'] as String?,
       institutionLogoUrl: json['institutionLogoUrl'] as String?,
-      primaryColor: json['primaryColor'] as String?,
-      secondaryColor: json['secondaryColor'] as String?,
     );
   }
 
@@ -94,10 +88,9 @@ class ExamServer extends Equatable {
         port,
         signalStrength,
         authCode,
+        requiredAppVersion,
         institutionName,
         institutionLogoUrl,
-        primaryColor,
-        secondaryColor,
       ];
 
   @override

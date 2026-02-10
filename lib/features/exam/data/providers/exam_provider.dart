@@ -12,6 +12,7 @@ import 'package:smashrite/features/exam/data/services/answer_sync_service.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:smashrite/core/services/network_monitor_service.dart';
+import 'package:smashrite/core/services/kiosk_service.dart';
 
 final syncStatusProvider = StateProvider<SyncStatus>((ref) => SyncStatus.idle);
 
@@ -208,6 +209,15 @@ class ExamNotifier extends StateNotifier<ExamSession?> {
             durationMinutes, // Pass exam duration for smart sync interval
       );
 
+      // 11. Enable kiosk mode for the exam
+      debugPrint('🔒 Enabling kiosk mode...');
+      final kioskEnabled = await KioskService.enableKioskMode();
+      if (!kioskEnabled) {
+        debugPrint('⚠️ WARNING: Kiosk mode failed to enable');
+      }else{
+        debugPrint('✅ Kiosk mode enabled successfully');
+      }
+
       debugPrint(
         '✅ Exam started successfully with background sync (${durationMinutes}min exam)',
       );
@@ -346,6 +356,18 @@ class ExamNotifier extends StateNotifier<ExamSession?> {
     NetworkMonitorService.onServerReconnected = () {
       debugPrint('✅ Server reconnected!');
       ref.read(serverReconnectedProvider.notifier).state = true;
+    };
+
+    // Multi-window detection
+    SecurityService.onMultiWindowDetected = () {
+      debugPrint('🚨 Multi-window mode detected - CRITICAL VIOLATION');
+      
+      // Immediately terminate - this is a critical cheat attempt
+      _terminateAppDueToViolation(
+        'multi_window_detected',
+        'Student attempted to use split-screen/multi-window mode during exam. '
+        'This is strictly prohibited as it allows viewing other apps simultaneously.',
+      );
     };
 
     debugPrint('✅ All security callbacks configured');
@@ -868,6 +890,11 @@ class ExamNotifier extends StateNotifier<ExamSession?> {
       // CRITICAL: Stop all monitoring FIRST
       _stopAllMonitoring();
 
+
+      // Disable kiosk mode
+      debugPrint('🔓 Disabling kiosk mode...');
+      await KioskService.disableKioskMode();
+
       // Force sync all pending answers
       ref.read(syncStatusProvider.notifier).state = SyncStatus.syncing;
       await AnswerSyncService.forceSync((status) {
@@ -1003,6 +1030,10 @@ class ExamNotifier extends StateNotifier<ExamSession?> {
       // 3. Stop all monitoring
       debugPrint('🛑 Step 3/5: Stopping all monitoring...');
       _stopAllMonitoring();
+
+
+      //---- Disable kiosk mode
+      await KioskService.disableKioskMode();
 
       // 4. Report violation to backend
       debugPrint('📡 Step 4/5: Reporting violation to backend...');
@@ -1273,7 +1304,7 @@ class ExamNotifier extends StateNotifier<ExamSession?> {
   }
 
   // Centralized method to stop all monitoring + clear security callbacks
-  void _stopAllMonitoring() {
+  Future<void> _stopAllMonitoring() async {
     debugPrint('🛑 Stopping all monitoring services...');
 
     // Stop periodic violation check
@@ -1306,6 +1337,10 @@ class ExamNotifier extends StateNotifier<ExamSession?> {
 
     // Clear question index for SecurityService
     SecurityService.setCurrentQuestionId(null);
+
+    if (KioskService.isEnabled) {
+      await KioskService.forceDisable();
+    }
 
     debugPrint('✅ All monitoring stopped and callbacks cleared');
   }

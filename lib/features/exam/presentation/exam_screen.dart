@@ -22,6 +22,7 @@ import 'package:smashrite/features/server_connection/data/models/exam_server.dar
 import 'package:smashrite/features/server_connection/data/services/server_connection_service.dart';
 import 'package:smashrite/core/services/security_globals.dart';
 import 'package:smashrite/features/exam/widgets/question_image.dart';
+import 'package:smashrite/core/services/kiosk_service.dart';
 
 class ExamScreen extends ConsumerStatefulWidget {
   const ExamScreen({super.key});
@@ -572,6 +573,9 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
     }
 
     super.dispose();
+    KioskService.forceDisable().then((_) {
+      debugPrint('✅ Kiosk mode disabled on screen disposal');
+    });
   }
 
   void _goToQuestion(int index) {

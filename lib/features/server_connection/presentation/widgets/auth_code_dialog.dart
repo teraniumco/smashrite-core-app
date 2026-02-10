@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:smashrite/core/theme/app_theme.dart';
 import 'package:smashrite/features/server_connection/data/models/exam_server.dart';
 import 'package:smashrite/features/server_connection/data/services/server_connection_service.dart';
+import 'package:smashrite/core/services/version_check_service.dart';
+import 'package:go_router/go_router.dart';
 
 class AuthCodeDialog extends StatefulWidget {
   final ExamServer server;
@@ -31,6 +33,7 @@ class _AuthCodeDialogState extends State<AuthCodeDialog> {
     super.dispose();
   }
 
+
   Future<void> _verifyAndConnect() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -56,16 +59,26 @@ class _AuthCodeDialogState extends State<AuthCodeDialog> {
           name: result['server_name'] ?? serverWithAuth.name,
           institutionName: result['institution_name'],
           institutionLogoUrl: result['institution_logo_url'],
-          primaryColor: result['primary_color'],
-          secondaryColor: result['secondary_color'],
+          requiredAppVersion: result['required_app_version'],
         );
 
         // Save server details
         await _connectionService.saveServerDetails(updatedServer);
 
-        // Close dialog and navigate to login
+        // Close dialog
         Navigator.pop(context);
-        widget.onSuccess();
+        
+        // Check if version update is required
+        final requiredVersion = result['required_app_version'] ?? '1.0.0';
+        final needsUpdate = await VersionCheckService.shouldShowVersionCheck(
+          requiredVersion,
+        );
+        
+        if (needsUpdate) {
+          context.go('/app-version-check', extra: requiredVersion);
+        } else {
+          widget.onSuccess();
+        }
       } else {
         setState(() {
           _error = result['message'] ?? 'Connection failed. Please try again.';

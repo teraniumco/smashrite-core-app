@@ -17,7 +17,8 @@ import 'package:smashrite/features/server_connection/data/models/exam_server.dar
 import 'package:smashrite/features/server_connection/data/services/server_connection_service.dart';
 
 class SecurityService {
-  static const platform = MethodChannel('com.smashrite/violations');
+  static Function()? onMultiWindowDetected;
+  static const platform = MethodChannel('com.smashrite.core/violations');
 
   // Existing callbacks for screenshot/recording/app switching
   static Function(int count, DateTime timestamp)? onScreenshotDetected;
@@ -64,7 +65,7 @@ class SecurityService {
     if (_dio == null) {
       _dio = Dio(
         BaseOptions(
-          baseUrl: 'https://api.smashrite.com',
+          baseUrl: 'https://api.smashrite.com/v1',
           connectTimeout: const Duration(seconds: 30),
           receiveTimeout: const Duration(seconds: 30),
           headers: {
@@ -777,7 +778,32 @@ class SecurityService {
           await _reportScreenRecordingViolation();
         }
         break;
+
+      case 'onMultiWindowDetected':
+        final timestamp = DateTime.fromMillisecondsSinceEpoch(
+          ((call.arguments['timestamp'] as double) * 1000).toInt(),
+        );
+        debugPrint('🚨 CRITICAL: Multi-window mode detected at $timestamp');
+        onMultiWindowDetected?.call();
+        await _reportMultiWindowViolation(timestamp);
+        break;
     }
+  }
+
+
+  static Future<void> _reportMultiWindowViolation(DateTime timestamp) async {
+    final violation = SecurityViolation(
+      type: ViolationType.suspiciousBehavior,
+      severity: ViolationSeverity.critical,
+      description: 'Split-screen/Multi-window mode detected during exam',
+      detectedAt: timestamp,
+      metadata: {
+        'composite_fingerprint': _compositeFingerprint,
+        'question_index': _currentQuestionId,
+      },
+    );
+
+    await _reportSecurityViolation(violation);
   }
 
   static void _startScreenRecordingMonitor() {

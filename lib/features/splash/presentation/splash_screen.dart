@@ -45,48 +45,15 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   Future<void> _initializeApp() async {
     try {
-      // Initialize storage service
       await StorageService.init();
-
-      // Wait for splash duration
       await Future.delayed(AppConstants.splashDuration);
-
       if (!mounted) return;
-
-      // Check first launch status
-      final isFirstLaunch = StorageService.get<bool>(
-        AppConstants.isFirstLaunch,
-        defaultValue: true,
-      );
-
-      // Check if user has connected to any exam server
-      final hasConnectedToServer = StorageService.get<bool>(
-        AppConstants.hasConnectedToServer,
-        defaultValue: false,
-      );
-
-      // Check authentication status
-      final accessToken = StorageService.get<String>(AppConstants.accessToken);
-      final isAuthenticated = accessToken != null && accessToken.isNotEmpty;
-
-      // Navigation logic
-      if (isFirstLaunch == true || !hasConnectedToServer!) {
-        // First time user or never connected to server -> Onboarding
-        context.go('/onboarding');
-      } else if (!isAuthenticated) {
-        // Not authenticated -> Login
-        context.go('/login');
-      } else {
-        // Authenticated -> Dashboard
-        context.go('/dashboard');
-      }
+      
+      // Go to pre-flight check (it handles navigation)
+      context.go('/pre-flight-check');
     } catch (e) {
-      // Handle initialization errors
-      debugPrint('Splash screen error: $e');
-      if (mounted) {
-        // On error, go to onboarding as safe fallback
-        context.go('/onboarding');
-      }
+      debugPrint('Error: $e');
+      if (mounted) context.go('/pre-flight-check');
     }
   }
 

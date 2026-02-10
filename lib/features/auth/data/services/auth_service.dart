@@ -59,10 +59,25 @@ class AuthService {
     try {
       final serverURL = dio.options.baseUrl;
 
+      final skipCount = StorageService.get<int>(
+        AppConstants.versionSkipCount,
+      ) ?? 0;
+      
+      final skipsRemaining = AppConstants.maxVersionSkips - skipCount;
+
+      if(skipsRemaining <= 0){
+        return {
+          'success': false,
+          'message': "Login failed. You need to update your app version.",
+          'reason': "app_update_required",
+        };
+      }
+
       // Gather device fingerprinting data from SecurityService
       final deviceData = <String, dynamic>{
         'access_code': accessCode,
         'student_id': studentId,
+        'app_update_skips': skipsRemaining,
       };
 
       // Add enhanced device fingerprinting if available

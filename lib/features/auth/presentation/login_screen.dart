@@ -69,9 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       if (server != null) {
-        AuthService.initialize(
-          server.url,
-        );
+        AuthService.initialize(server.url);
       }
     }
   }
@@ -83,10 +81,11 @@ class _LoginScreenState extends State<LoginScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => ServerInfoModal(
-        server: _currentServer!,
-        onDisconnect: _handleDisconnect,
-      ),
+      builder:
+          (context) => ServerInfoModal(
+            server: _currentServer!,
+            onDisconnect: _handleDisconnect,
+          ),
     );
   }
 
@@ -97,25 +96,24 @@ class _LoginScreenState extends State<LoginScreen> {
     // Show confirmation dialog
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Disconnect from Server?'),
-        content: const Text(
-          'You will need to reconnect to access exams. Continue?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.error,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Disconnect from Server?'),
+            content: const Text(
+              'You will need to reconnect to access exams. Continue?',
             ),
-            child: const Text('Disconnect'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: TextButton.styleFrom(foregroundColor: AppColors.error),
+                child: const Text('Disconnect'),
+              ),
+            ],
           ),
-        ],
-      ),
     );
 
     if (confirm == true) {
@@ -132,25 +130,23 @@ class _LoginScreenState extends State<LoginScreen> {
   void _showNetworkErrorDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Network Error'),
-        content: Text(
-          _networkError ?? 'Network validation failed',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 17,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Network Error'),
+            content: Text(
+              _networkError ?? 'Network validation failed',
+              style: TextStyle(color: AppColors.textPrimary, fontSize: 17),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _validateNetwork();
+                },
+                child: const Text('Retry'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _validateNetwork();
-            },
-            child: const Text('Retry'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -183,72 +179,83 @@ class _LoginScreenState extends State<LoginScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.warning_amber, color: AppColors.warning),
-            const SizedBox(width: 12),
-            const Expanded(child: Text('Active Session Found')),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              result['message'] ?? 'You have an active session on another device',
-              style: const TextStyle(fontSize: 15),
+      builder:
+          (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.warning_amber, color: AppColors.warning),
+                const SizedBox(width: 12),
+                const Expanded(child: Text('Active Session Found')),
+              ],
             ),
-            if (activeSession != null) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: AppColors.textSecondary.withOpacity(0.2),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  result['message'] ??
+                      'You have an active session on another device',
+                  style: const TextStyle(fontSize: 15),
+                ),
+                if (activeSession != null) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: AppColors.textSecondary.withOpacity(0.2),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildInfoRow(
+                          'Test',
+                          activeSession['test_title'] ?? 'Unknown',
+                        ),
+                        const SizedBox(height: 8),
+                        _buildInfoRow(
+                          'Device',
+                          activeSession['device_model'] ?? 'Unknown',
+                        ),
+                        const SizedBox(height: 8),
+                        _buildInfoRow(
+                          'Started',
+                          activeSession['started_at'] ?? 'Unknown',
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Text(
+                  'You can force logout from that device to continue here.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
                   ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildInfoRow('Test', activeSession['test_title'] ?? 'Unknown'),
-                    const SizedBox(height: 8),
-                    _buildInfoRow('Device', activeSession['device_model'] ?? 'Unknown'),
-                    const SizedBox(height: 8),
-                    _buildInfoRow('Started', activeSession['started_at'] ?? 'Unknown'),
-                  ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await _forceLogoutOtherDevices();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.warning,
                 ),
+                child: const Text('Force Logout & Continue'),
               ),
             ],
-            const SizedBox(height: 16),
-            Text(
-              'You can force logout from that device to continue here.',
-              style: TextStyle(
-                fontSize: 13,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
           ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _forceLogoutOtherDevices();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.warning,
-            ),
-            child: const Text('Force Logout & Continue'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -256,39 +263,40 @@ class _LoginScreenState extends State<LoginScreen> {
   void _showDeviceConsistencyDialog(Map<String, dynamic> result) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.security, color: AppColors.error),
-            const SizedBox(width: 12),
-            const Text('Device Verification Failed'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              result['message'] ?? 'Device hardware verification failed',
-              style: const TextStyle(fontSize: 15),
+      builder:
+          (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.security, color: AppColors.error),
+                const SizedBox(width: 12),
+                const Text('Device Verification Failed'),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Your device hardware characteristics have changed. Please contact support for assistance.',
-              style: TextStyle(
-                fontSize: 13,
-                color: AppColors.textSecondary,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  result['message'] ?? 'Device hardware verification failed',
+                  style: const TextStyle(fontSize: 15),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Your device hardware characteristics have changed. Please contact support for assistance.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+            ],
           ),
-        ],
-      ),
     );
   }
 
@@ -296,39 +304,40 @@ class _LoginScreenState extends State<LoginScreen> {
   void _showDeviceLimitDialog(Map<String, dynamic> result) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.devices, color: AppColors.warning),
-            const SizedBox(width: 12),
-            const Text('Device Limit Reached'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              result['message'] ?? 'Maximum device limit reached',
-              style: const TextStyle(fontSize: 15),
+      builder:
+          (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.devices, color: AppColors.warning),
+                const SizedBox(width: 12),
+                const Text('Device Limit Reached'),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text(
-              'You can register up to 2 devices. Please contact your administrator to remove a device before registering this one.',
-              style: TextStyle(
-                fontSize: 13,
-                color: AppColors.textSecondary,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  result['message'] ?? 'Maximum device limit reached',
+                  style: const TextStyle(fontSize: 15),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'You can register up to 2 devices. Please contact your administrator to remove a device before registering this one.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+            ],
           ),
-        ],
-      ),
     );
   }
 
@@ -350,10 +359,7 @@ class _LoginScreenState extends State<LoginScreen> {
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
           ),
         ),
       ],
@@ -372,7 +378,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (result['success'] == true) {
         showTopSnackBar(
           context,
-          message: 'Logged out from ${result['sessions_ended']} other device(s)',
+          message:
+              'Logged out from ${result['sessions_ended']} other device(s)',
           backgroundColor: AppColors.success,
         );
 
@@ -440,7 +447,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    if (SecurityService.installationId == null || 
+    if (SecurityService.installationId == null ||
         SecurityService.compositeFingerprint == null) {
       showTopSnackBar(
         context,
@@ -455,7 +462,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       // Step 1: Login with device fingerprinting data
       debugPrint('🔐 Attempting login with device verification...');
-      
+
       final result = await AuthService.login(
         server: _currentServer!,
         studentId: _studentIdController.text.trim(),
@@ -467,35 +474,37 @@ class _LoginScreenState extends State<LoginScreen> {
       if (result['success'] == true) {
         // Step 2: Configure security service with server
         await SecurityService.configureServer(_currentServer!);
-        
+
         // Step 3: Extract student ID from response
         final responseData = result['data'] as Map<String, dynamic>;
         final student = responseData['student'] as Map<String, dynamic>;
         final studentId = student['id'] as int;
-        
+
         // Step 4: Check device registration status from backend response
         final deviceRegistered = responseData['device_registered'] ?? false;
-        final requiresRegistration = responseData['requires_registration'] ?? false;
-        
+        final requiresRegistration =
+            responseData['requires_registration'] ?? false;
+
         if (!deviceRegistered || requiresRegistration) {
           // Device not registered - register it now
           debugPrint('📱 Device not registered, registering now...');
-          
+
           final registrationResult = await SecurityService.registerDevice(
             studentId: studentId,
           );
-          
+
           if (registrationResult['success'] != true) {
             // Handle registration failure
             showTopSnackBar(
               context,
-              message: registrationResult['message'] ?? 'Device registration failed',
+              message:
+                  registrationResult['message'] ?? 'Device registration failed',
               backgroundColor: AppColors.error,
             );
             setState(() => _isLoading = false);
             return;
           }
-          
+
           // Show device registered successfully
           showTopSnackBar(
             context,
@@ -505,7 +514,7 @@ class _LoginScreenState extends State<LoginScreen> {
         } else {
           debugPrint('✅ Device already registered');
         }
-        
+
         // Step 5: Show success message
         showTopSnackBar(
           context,
@@ -517,11 +526,20 @@ class _LoginScreenState extends State<LoginScreen> {
         await Future.delayed(const Duration(milliseconds: 500));
         if (!mounted) return;
         context.go('/dashboard');
-        
       } else {
         // Login failed - check if it's a device verification issue
         final reason = result['reason'];
+
+        if (reason == "app_update_required") {
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (!mounted) return;
+          context.go('/app-version-check');
+          return;
+        }
+
         final requiresAction = result['requires_action'] ?? false;
+
+        if (!mounted) return;
 
         if (requiresAction) {
           // Handle device verification errors with dialogs
@@ -530,7 +548,9 @@ class _LoginScreenState extends State<LoginScreen> {
           // Standard login error
           showTopSnackBar(
             context,
-            message: result['message'] ?? 'Login failed. Please check your credentials.',
+            message:
+                result['message'] ??
+                'Login failed. Please check your credentials.',
             backgroundColor: AppColors.error,
           );
         }
@@ -552,7 +572,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canLogin = !_isCheckingNetwork && _networkError == null && !_isLoading;
+    final canLogin =
+        !_isCheckingNetwork && _networkError == null && !_isLoading;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -579,10 +600,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         children: [
                           Text(
                             'Sign In',
-                            style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 28,
-                                ),
+                            style: Theme.of(
+                              context,
+                            ).textTheme.displaySmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 28,
+                            ),
                           ),
 
                           // Server Status Button
@@ -631,8 +654,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       Text(
                         'Enter your credentials to access the exam.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: AppColors.textPrimary,
-                            ),
+                          color: AppColors.textPrimary,
+                        ),
                       ),
                       const SizedBox(height: 24),
 
@@ -666,8 +689,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       Text(
                         'Student ID',
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       const SizedBox(height: 8),
                       TextFormField(
@@ -691,8 +714,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       Text(
                         'Access Code',
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       const SizedBox(height: 8),
                       TextFormField(
@@ -733,27 +756,32 @@ class _LoginScreenState extends State<LoginScreen> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF1E3A8A),
                             padding: const EdgeInsets.symmetric(vertical: 10),
-                            disabledBackgroundColor: AppColors.textSecondary.withOpacity(0.3),
+                            disabledBackgroundColor: AppColors.textSecondary
+                                .withOpacity(0.3),
                           ),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      AppColors.textPrimary,
+                          child:
+                              _isLoading
+                                  ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        AppColors.textPrimary,
+                                      ),
+                                    ),
+                                  )
+                                  : Text(
+                                    'Enter Exam Lobby',
+                                    style: TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                      color:
+                                          canLogin
+                                              ? Colors.white
+                                              : AppColors.textSecondary,
                                     ),
                                   ),
-                                )
-                              : Text(
-                                  'Enter Exam Lobby',
-                                  style: TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.bold,
-                                    color: canLogin ? Colors.white : AppColors.textSecondary,
-                                  ),
-                                ),
                         ),
                       ),
                       const SizedBox(height: 24),
@@ -764,9 +792,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         decoration: BoxDecoration(
                           color: const Color(0xFFFEF3C7),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: const Color(0xFFFCD34D),
-                          ),
+                          border: Border.all(color: const Color(0xFFFCD34D)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -791,24 +817,24 @@ class _LoginScreenState extends State<LoginScreen> {
                             const SizedBox(height: 8),
                             Text(
                               'If you encounter persistent issues, please contact your Digital Exam Administrator or Smashrite support using the information below.',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: AppColors.textPrimary,
-                                    height: 1.4,
-                                  ),
+                              style: Theme.of(
+                                context,
+                              ).textTheme.bodySmall?.copyWith(
+                                color: AppColors.textPrimary,
+                                height: 1.4,
+                              ),
                             ),
                             const SizedBox(height: 12),
                             Text(
                               'Phone: +234 902 682 9282',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'Email: support@smashrite.com',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
@@ -873,10 +899,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
 
             // Institution Logo
-            Flexible(
-              flex: 1,
-              child: _buildInstitutionLogo(),
-            ),
+            Flexible(flex: 1, child: _buildInstitutionLogo()),
           ],
         ),
       ),
@@ -893,7 +916,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (loadingProgress == null) {
           return child;
         }
-        
+
         // Show loading indicator while image loads
         return SizedBox(
           height: 80,
@@ -902,10 +925,11 @@ class _LoginScreenState extends State<LoginScreen> {
               width: 30,
               height: 30,
               child: CircularProgressIndicator(
-                value: loadingProgress.expectedTotalBytes != null
-                    ? loadingProgress.cumulativeBytesLoaded /
-                        loadingProgress.expectedTotalBytes!
-                    : null,
+                value:
+                    loadingProgress.expectedTotalBytes != null
+                        ? loadingProgress.cumulativeBytesLoaded /
+                            loadingProgress.expectedTotalBytes!
+                        : null,
                 strokeWidth: 2.5,
                 valueColor: AlwaysStoppedAnimation<Color>(
                   AppColors.primary.withOpacity(0.6),
@@ -968,10 +992,7 @@ class _LoginScreenState extends State<LoginScreen> {
           Expanded(
             child: Text(
               text,
-              style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(color: color, fontWeight: FontWeight.bold),
             ),
           ),
           if (action != null) action,
@@ -989,7 +1010,7 @@ class _AccessCodeFormatter extends TextInputFormatter {
     TextEditingValue newValue,
   ) {
     final text = newValue.text.toUpperCase().replaceAll('-', '');
-    
+
     if (text.isEmpty) {
       return newValue.copyWith(text: '');
     }

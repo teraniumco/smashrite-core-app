@@ -18,8 +18,7 @@ class AppConstants {
   static const String currentExamData = 'current_exam_data';
   
   // App Info
-  static const String appName = 'Smashrite';
-  static const String appVersion = '1.0.0';
+  static const String appName = 'Smashrite Core';
   
   // Animation Durations
   static const Duration splashDuration = Duration(seconds: 3);
@@ -31,4 +30,9 @@ class AppConstants {
   // Timeouts
   static const Duration connectionTimeout = Duration(seconds: 30);
   static const Duration receiveTimeout = Duration(seconds: 30);
+
+  // App version control
+  static const String versionSkipCount = 'version_skip_count';
+  static const String lastSkippedVersion = 'last_skipped_version';
+  static const int maxVersionSkips = 3;
 }

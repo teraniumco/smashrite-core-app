@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:smashrite/features/exam/presentation/exam_screen.dart';
 import 'package:smashrite/features/exam/presentation/exam_submitted_screen.dart';
 import 'package:smashrite/features/exam/presentation/feedback_survey_screen.dart';
+import 'package:smashrite/features/pre_flight/presentation/screens/pre_flight_check_screen.dart';
 import 'package:smashrite/features/splash/presentation/splash_screen.dart';
 import 'package:smashrite/features/onboarding/presentation/onboarding_screen.dart';
 import 'package:smashrite/features/server_connection/presentation/server_connection_screen.dart';
@@ -15,6 +16,7 @@ import 'package:smashrite/features/exam/presentation/exam_lobby_screen.dart';
 import 'package:smashrite/features/security/presentation/security_violation_screen.dart';
 import 'package:smashrite/features/security/presentation/device_mismatch_screen.dart';
 import 'package:smashrite/core/services/security_service.dart';
+import 'package:smashrite/features/app_version/presentation/screens/app_version_check_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -209,6 +211,18 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/feedback-survey',
         builder: (context, state) => const FeedbackSurveyScreen(),
+      ),
+
+      GoRoute(
+        path: '/pre-flight-check',
+        builder: (context, state) => const PreFlightCheckScreen(),
+      ),
+
+      GoRoute(
+        path: '/app-version-check',
+        builder: (context, state) => AppVersionCheckScreen(
+          requiredVersion: state.extra as String,
+        ),
       ),
 
     ],

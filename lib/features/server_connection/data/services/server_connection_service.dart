@@ -5,6 +5,7 @@ import 'package:smashrite/core/constants/app_constants.dart';
 import 'package:smashrite/core/network/udp_discovery_service.dart';
 import 'package:smashrite/core/storage/storage_service.dart';
 import '../models/exam_server.dart';
+import 'package:package_info_plus/package_info_plus.dart' as package_info;
 
 /// Service for managing server connections
 class ServerConnectionService {
@@ -32,11 +33,14 @@ class ServerConnectionService {
   Future<Map<String, dynamic>> testConnection(ExamServer server) async {
     try {
       final apiKey = await _getApiKey();
+      final packageInfo = await package_info.PackageInfo.fromPlatform();
       
       final response = await _dio.post(
         '${server.url}/server/connect',
         data: {
           "auth_code": server.authCode,
+          "app_version": packageInfo.version,
+          "app_build_number": packageInfo.buildNumber,
         },
         options: Options(
           headers: {
@@ -52,15 +56,14 @@ class ServerConnectionService {
         
         if (data['success'] == true) {
           final serverData = data['data'] as Map<String, dynamic>;
-
+         
           return {
             'success': true,
             'message': data['message'] ?? 'Connected successfully',
             'server_name': serverData['server_name'],
             'institution_name': serverData['institution'],
             'institution_logo_url': serverData['institution_logo_url'],
-            'primary_color': serverData['primary_color'],
-            'secondary_color': serverData['secondary_color'],
+            'required_app_version': serverData['required_app_version'],
           };
          
         } else {
