@@ -1,9 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:smashrite/core/constants/app_constants.dart';
 import 'package:smashrite/core/storage/storage_service.dart';
 import 'package:smashrite/features/server_connection/data/services/server_connection_service.dart';
-import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart' as package_info;
 
 class FeedbackService {
@@ -12,24 +15,106 @@ class FeedbackService {
   static const String _pendingFeedbackKey = 'pending_feedback';
   static const String _syncedFeedbackKey = 'synced_feedback';
 
-  /// Submit feedback (stores locally and syncs to server if online)
+  // ── Shared CA SecurityContext ─────────────────────────────────────────────
+  // Pinned to the Smashrite CA — same cert used across all services.
+  // The plain http package cannot use a custom SecurityContext, which is
+  // why it has been replaced with Dio + IOHttpClientAdapter here.
+  static SecurityContext? _securityContext;
+
+  static Future<SecurityContext> _buildSecurityContext() async {
+    if (_securityContext != null) return _securityContext!;
+
+    try {
+      final caBytes = await rootBundle.load('assets/certs/smashrite_ca.crt');
+      final context = SecurityContext(withTrustedRoots: false);
+      context.setTrustedCertificatesBytes(caBytes.buffer.asUint8List());
+      _securityContext = context;
+      debugPrint('[FeedbackService][SSL] Smashrite CA loaded.');
+    } catch (e) {
+      debugPrint('[FeedbackService][SSL] CRITICAL: Failed to load CA cert: $e');
+      rethrow;
+    }
+
+    return _securityContext!;
+  }
+
+  static Future<void> _applySecureAdapter(Dio dio) async {
+    final context = await _buildSecurityContext();
+
+    (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
+      final client = HttpClient(context: context);
+      client.badCertificateCallback = (
+        X509Certificate cert,
+        String host,
+        int port,
+      ) {
+        debugPrint(
+          '[FeedbackService][SSL] Rejected cert for unexpected host: $host:$port',
+        );
+        return false;
+      };
+      return client;
+    };
+  }
+
+  static String _enforceHttps(String url) {
+    if (url.startsWith('http://')) {
+      debugPrint(
+        '[FeedbackService][SSL] Warning: upgrading HTTP → HTTPS for $url',
+      );
+      return url.replaceFirst('http://', 'https://');
+    }
+    return url;
+  }
+
+  /// Build a CA-pinned Dio instance for a given [baseUrl] and [token].
+  /// Called fresh per sync attempt so the latest server URL is always used.
+  Future<Dio> _buildDio(String baseUrl, String token) async {
+    final dio = Dio(
+      BaseOptions(
+        baseUrl: _enforceHttps(baseUrl),
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ),
+    );
+
+    await _applySecureAdapter(dio);
+
+    if (kDebugMode) {
+      dio.interceptors.add(
+        LogInterceptor(
+          requestBody: true,
+          responseBody: true,
+          logPrint: (obj) => debugPrint('[FeedbackService] $obj'),
+        ),
+      );
+    }
+
+    return dio;
+  }
+
+  // ── Public API ────────────────────────────────────────────────────────────
+
+  /// Submit feedback — stores locally first, then syncs to server over HTTPS.
   Future<Map<String, dynamic>> submitFeedback(
     Map<String, dynamic> feedbackData,
   ) async {
     try {
-      // Get current exam and student data for context
-      // Handle both String (JSON) and Map storage formats
       final examData = _getMapFromStorage(AppConstants.currentExamData);
       final studentData = _getMapFromStorage(AppConstants.studentData);
       final accessCodeId = StorageService.get<String>(
         AppConstants.accessCodeId,
       );
-      final packageInfo = await package_info.PackageInfo.fromPlatform();
+      final pkgInfo = await package_info.PackageInfo.fromPlatform();
 
-      debugPrint('📝 FeedbackService: examData type: ${examData.runtimeType}');
-      debugPrint('📝 FeedbackService: studentData: ${studentData}');
+      debugPrint('[FeedbackService] examData type: ${examData.runtimeType}');
+      debugPrint('[FeedbackService] studentData: $studentData');
 
-      // Enrich feedback with metadata
       final enrichedFeedback = {
         ...feedbackData,
         'test_id': examData?['id'],
@@ -39,19 +124,18 @@ class FeedbackService {
         'studentId': studentData?['student_id'],
         'access_code_id': accessCodeId,
         'device_info': await _getDeviceInfo(),
-        'app_version': packageInfo.version,
+        'app_version': pkgInfo.version,
       };
 
-      debugPrint('📝 FeedbackService: Enriched feedback: $enrichedFeedback');
+      debugPrint('[FeedbackService] Enriched feedback: $enrichedFeedback');
 
-      // Store locally first (always succeeds)
+      // Always store locally first
       await _storeLocalFeedback(enrichedFeedback);
 
-      // Try to sync to server
+      // Attempt server sync
       final syncResult = await _syncToServer(enrichedFeedback);
 
       if (syncResult['success'] == true) {
-        // Successfully synced - move to synced storage
         await _markAsSynced(enrichedFeedback);
         return {
           'success': true,
@@ -59,7 +143,6 @@ class FeedbackService {
           'synced': true,
         };
       } else {
-        // Failed to sync but stored locally
         return {
           'success': true,
           'message': 'Feedback saved. Will sync when online.',
@@ -67,10 +150,8 @@ class FeedbackService {
         };
       }
     } catch (e, stackTrace) {
-      debugPrint(
-        '[!! WARNING !!] FeedbackService: Error submitting feedback: $e',
-      );
-      debugPrint('[!! WARNING !!] Stack trace: $stackTrace');
+      debugPrint('[FeedbackService] Error submitting feedback: $e');
+      debugPrint('[FeedbackService] Stack trace: $stackTrace');
       return {
         'success': false,
         'message': 'Failed to save feedback',
@@ -79,39 +160,26 @@ class FeedbackService {
     }
   }
 
-  /// Helper to get Map from storage, handling both String and Map formats
+  // ── Private helpers ───────────────────────────────────────────────────────
+
   Map<String, dynamic>? _getMapFromStorage(String key) {
     try {
       final data = StorageService.get(key);
-
-      if (data == null) {
-        return null;
-      }
-
-      // If it's already a Map
-      if (data is Map) {
-        return Map<String, dynamic>.from(data);
-      }
-
-      // If it's a String (JSON), parse it
-      if (data is String) {
-        return jsonDecode(data) as Map<String, dynamic>;
-      }
-
+      if (data == null) return null;
+      if (data is Map) return Map<String, dynamic>.from(data);
+      if (data is String) return jsonDecode(data) as Map<String, dynamic>;
       debugPrint(
-        '[!! WARNING !!] FeedbackService: Unexpected data type for $key: ${data.runtimeType}',
+        '[FeedbackService] Unexpected type for $key: ${data.runtimeType}',
       );
       return null;
     } catch (e) {
-      debugPrint('[!! WARNING !!] FeedbackService: Error parsing $key: $e');
+      debugPrint('[FeedbackService] Error parsing $key: $e');
       return null;
     }
   }
 
-  /// Store feedback locally using Hive
   Future<void> _storeLocalFeedback(Map<String, dynamic> feedback) async {
     try {
-      // Get existing pending feedback
       final pendingData = StorageService.get(_pendingFeedbackKey);
       List<dynamic> pendingList = [];
 
@@ -119,12 +187,10 @@ class FeedbackService {
         if (pendingData is List) {
           pendingList = pendingData;
         } else if (pendingData is String) {
-          // If stored as JSON string
           pendingList = jsonDecode(pendingData) as List;
         }
       }
 
-      // Add new feedback with timestamp
       final feedbackWithId = {
         ...feedback,
         'local_id': DateTime.now().millisecondsSinceEpoch.toString(),
@@ -133,82 +199,72 @@ class FeedbackService {
       };
 
       pendingList.add(feedbackWithId);
-
-      // Save back to storage
       await StorageService.save(_pendingFeedbackKey, pendingList);
 
       debugPrint(
-        '✅ FeedbackService: Feedback stored locally (${pendingList.length} total)',
+        '[FeedbackService] Feedback stored locally (${pendingList.length} total)',
       );
     } catch (e) {
-      debugPrint(
-        '[!! WARNING !!] FeedbackService: Error storing local feedback: $e',
-      );
+      debugPrint('[FeedbackService] Error storing local feedback: $e');
       rethrow;
     }
   }
 
-  /// Sync feedback to server
+  /// Sync a single feedback entry to the server using a CA-pinned Dio request.
   Future<Map<String, dynamic>> _syncToServer(
     Map<String, dynamic> feedback,
   ) async {
     try {
-      // Get server and token
       final server = await _serverService.getSavedServer();
       final token = StorageService.get<String>(AppConstants.accessToken);
 
       if (server == null || token == null) {
-        debugPrint(
-          '[!! WARNING !!] FeedbackService: No server or token available',
-        );
+        debugPrint('[FeedbackService] No server or token available for sync.');
         return {'success': false, 'message': 'No server or token available'};
       }
 
-      // Make API request
-      final url = Uri.parse('${server.url}/student/feedback');
+      final dio = await _buildDio(server.url, token);
 
-      debugPrint('📤 FeedbackService: Syncing to $url');
+      debugPrint('[FeedbackService] Syncing to ${server.url}/student/feedback');
 
-      final response = await http
-          .post(
-            url,
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: jsonEncode(feedback),
-          )
-          .timeout(
-            const Duration(seconds: 30),
-            onTimeout: () {
-              throw Exception('Request timeout');
-            },
-          );
+      final response = await dio.post('/student/feedback', data: feedback);
 
-      debugPrint('📤 FeedbackService: Response status: ${response.statusCode}');
-      debugPrint('📤 FeedbackService: Response body: ${response.body}');
+      debugPrint('[FeedbackService] Response status: ${response.statusCode}');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        final data = jsonDecode(response.body);
-        debugPrint('✅ FeedbackService: Successfully synced to server');
-
+        debugPrint('[FeedbackService] Successfully synced to server.');
         return {
           'success': true,
-          'message': data['message'] ?? 'Feedback submitted',
-          'data': data,
+          'message': response.data['message'] ?? 'Feedback submitted',
+          'data': response.data,
         };
       } else {
-        debugPrint(
-          '[!! WARNING !!] FeedbackService: Server returned ${response.statusCode}',
-        );
+        debugPrint('[FeedbackService] Server returned ${response.statusCode}');
         return {
           'success': false,
           'message': 'Server error: ${response.statusCode}',
         };
       }
+    } on DioException catch (e) {
+      // Surface SSL failures clearly
+      if (e.error is HandshakeException) {
+        debugPrint(
+          '[FeedbackService][SSL] HandshakeException — cert not trusted by Smashrite CA.',
+        );
+        return {
+          'success': false,
+          'message': 'SSL error: Could not verify server certificate.',
+          'error': e.toString(),
+        };
+      }
+      debugPrint('[FeedbackService] Sync DioException: ${e.message}');
+      return {
+        'success': false,
+        'message': 'Could not connect to server',
+        'error': e.toString(),
+      };
     } catch (e) {
-      debugPrint('[!! WARNING !!] FeedbackService: Sync error: $e');
+      debugPrint('[FeedbackService] Sync error: $e');
       return {
         'success': false,
         'message': 'Could not connect to server',
@@ -217,17 +273,14 @@ class FeedbackService {
     }
   }
 
-  /// Mark feedback as synced (move from pending to synced storage)
   Future<void> _markAsSynced(Map<String, dynamic> feedback) async {
     try {
-      // Get pending and synced lists
       final pendingData = StorageService.get(_pendingFeedbackKey);
       final syncedData = StorageService.get(_syncedFeedbackKey);
 
       List<dynamic> pendingList = [];
       List<dynamic> syncedList = [];
 
-      // Parse pending list
       if (pendingData != null) {
         if (pendingData is List) {
           pendingList = pendingData;
@@ -236,7 +289,6 @@ class FeedbackService {
         }
       }
 
-      // Parse synced list
       if (syncedData != null) {
         if (syncedData is List) {
           syncedList = syncedData;
@@ -245,36 +297,30 @@ class FeedbackService {
         }
       }
 
-      // Find and remove from pending
       final localId = feedback['local_id'];
-      pendingList.removeWhere((item) {
-        if (item is Map) {
-          return item['local_id'] == localId;
-        }
-        return false;
-      });
+      pendingList.removeWhere(
+        (item) => item is Map && item['local_id'] == localId,
+      );
 
-      // Add to synced with sync timestamp
       syncedList.add({
         ...feedback,
         'synced_at': DateTime.now().toIso8601String(),
       });
 
-      // Save both lists
       await StorageService.save(_pendingFeedbackKey, pendingList);
       await StorageService.save(_syncedFeedbackKey, syncedList);
 
       debugPrint(
-        '✅ FeedbackService: Marked as synced (${pendingList.length} pending remaining)',
+        '[FeedbackService] Marked as synced (${pendingList.length} pending remaining)',
       );
     } catch (e) {
-      debugPrint(
-        '[!! WARNING !!] FeedbackService: Error marking as synced: $e',
-      );
+      debugPrint('[FeedbackService] Error marking as synced: $e');
     }
   }
 
-  /// Retry syncing all pending feedback (call this when app detects online)
+  // ── Retry pending feedback ────────────────────────────────────────────────
+
+  /// Retry syncing all pending feedback — call when app detects it is back online.
   Future<Map<String, dynamic>> syncPendingFeedback() async {
     try {
       final pendingData = StorageService.get(_pendingFeedbackKey);
@@ -297,19 +343,17 @@ class FeedbackService {
       }
 
       debugPrint(
-        '📤 FeedbackService: Syncing ${pendingList.length} pending feedback(s)',
+        '[FeedbackService] Syncing ${pendingList.length} pending feedback(s)',
       );
 
       int successCount = 0;
       int failCount = 0;
 
-      // Create a copy to iterate over
       final feedbacksToSync = List<dynamic>.from(pendingList);
 
       for (var feedback in feedbacksToSync) {
         if (feedback is! Map) continue;
 
-        // Increment sync attempts
         final updatedFeedback = Map<String, dynamic>.from(feedback);
         updatedFeedback['sync_attempts'] = (feedback['sync_attempts'] ?? 0) + 1;
 
@@ -321,26 +365,21 @@ class FeedbackService {
         } else {
           failCount++;
 
-          // If too many failed attempts (>5), skip this one for now
           if (updatedFeedback['sync_attempts'] > 5) {
             debugPrint(
-              '[!! WARNING !!] FeedbackService: Skipping feedback after ${updatedFeedback['sync_attempts']} attempts',
+              '[FeedbackService] Skipping feedback after ${updatedFeedback['sync_attempts']} attempts',
             );
           } else {
-            // Update the attempt count in storage
             final index = pendingList.indexWhere(
               (item) =>
                   item is Map &&
                   item['local_id'] == updatedFeedback['local_id'],
             );
-            if (index != -1) {
-              pendingList[index] = updatedFeedback;
-            }
+            if (index != -1) pendingList[index] = updatedFeedback;
           }
         }
       }
 
-      // Save updated pending list with new attempt counts
       await StorageService.save(_pendingFeedbackKey, pendingList);
 
       return {
@@ -350,7 +389,7 @@ class FeedbackService {
         'failed_count': failCount,
       };
     } catch (e) {
-      debugPrint('[!! WARNING !!] FeedbackService: Error syncing pending: $e');
+      debugPrint('[FeedbackService] Error syncing pending: $e');
       return {
         'success': false,
         'message': 'Sync failed',
@@ -359,10 +398,10 @@ class FeedbackService {
     }
   }
 
-  /// Get device info for context
+  // ── Device info ───────────────────────────────────────────────────────────
+
   Future<Map<String, dynamic>> _getDeviceInfo() async {
     try {
-      // You can enhance this with device_info_plus package
       return {
         'platform': defaultTargetPlatform.name,
         'timestamp': DateTime.now().toIso8601String(),
@@ -372,92 +411,62 @@ class FeedbackService {
     }
   }
 
-  /// Get pending feedback count (useful for debugging)
+  // ── Storage utilities ─────────────────────────────────────────────────────
+
   Future<int> getPendingCount() async {
-    final pendingData = StorageService.get(_pendingFeedbackKey);
-
-    if (pendingData == null) return 0;
-
-    if (pendingData is List) {
-      return pendingData.length;
-    }
-
-    if (pendingData is String) {
-      final list = jsonDecode(pendingData) as List;
-      return list.length;
-    }
-
+    final data = StorageService.get(_pendingFeedbackKey);
+    if (data == null) return 0;
+    if (data is List) return data.length;
+    if (data is String) return (jsonDecode(data) as List).length;
     return 0;
   }
 
-  /// Get synced feedback count (useful for debugging)
   Future<int> getSyncedCount() async {
-    final syncedData = StorageService.get(_syncedFeedbackKey);
-
-    if (syncedData == null) return 0;
-
-    if (syncedData is List) {
-      return syncedData.length;
-    }
-
-    if (syncedData is String) {
-      final list = jsonDecode(syncedData) as List;
-      return list.length;
-    }
-
+    final data = StorageService.get(_syncedFeedbackKey);
+    if (data == null) return 0;
+    if (data is List) return data.length;
+    if (data is String) return (jsonDecode(data) as List).length;
     return 0;
   }
 
-  /// Get all pending feedback (for debugging/admin view)
   Future<List<Map<String, dynamic>>> getPendingFeedback() async {
-    final pendingData = StorageService.get(_pendingFeedbackKey);
-
-    if (pendingData == null) return [];
-
-    List<dynamic> pendingList = [];
-
-    if (pendingData is List) {
-      pendingList = pendingData;
-    } else if (pendingData is String) {
-      pendingList = jsonDecode(pendingData) as List;
-    }
-
-    return pendingList
+    final data = StorageService.get(_pendingFeedbackKey);
+    if (data == null) return [];
+    List<dynamic> list =
+        data is List
+            ? data
+            : data is String
+            ? jsonDecode(data) as List
+            : [];
+    return list
         .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
+        .map((e) => Map<String, dynamic>.from(e))
         .toList();
   }
 
-  /// Get all synced feedback (for debugging/admin view)
   Future<List<Map<String, dynamic>>> getSyncedFeedback() async {
-    final syncedData = StorageService.get(_syncedFeedbackKey);
-
-    if (syncedData == null) return [];
-
-    List<dynamic> syncedList = [];
-
-    if (syncedData is List) {
-      syncedList = syncedData;
-    } else if (syncedData is String) {
-      syncedList = jsonDecode(syncedData) as List;
-    }
-
-    return syncedList
+    final data = StorageService.get(_syncedFeedbackKey);
+    if (data == null) return [];
+    List<dynamic> list =
+        data is List
+            ? data
+            : data is String
+            ? jsonDecode(data) as List
+            : [];
+    return list
         .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
+        .map((e) => Map<String, dynamic>.from(e))
         .toList();
   }
 
-  /// Clear all local feedback (use with caution - only for testing/cleanup)
   Future<void> clearAllFeedback() async {
     await StorageService.remove(_pendingFeedbackKey);
     await StorageService.remove(_syncedFeedbackKey);
-    debugPrint('🗑️ FeedbackService: All feedback cleared');
+    debugPrint('[FeedbackService] All feedback cleared.');
   }
 
-  /// Clear only synced feedback (for cleanup after successful sync)
   Future<void> clearSyncedFeedback() async {
     await StorageService.remove(_syncedFeedbackKey);
-    debugPrint('🗑️ FeedbackService: Synced feedback cleared');
+    debugPrint('[FeedbackService] Synced feedback cleared.');
   }
 }

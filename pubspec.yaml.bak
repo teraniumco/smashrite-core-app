@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+8
+version: 1.0.0+7
 
 environment:
   sdk: ^3.7.2
@@ -36,7 +36,7 @@ dependencies:
   riverpod_annotation: ^2.6.1
 
   # Device Security
-  freerasp: ^7.5.0
+  freerasp: ^6.8.0
   crypto: ^3.0.3
 
   # Routing
@@ -48,7 +48,7 @@ dependencies:
   http: ^1.2.0
   
   # QR Code Scanning
-  mobile_scanner: ^7.2.0
+  mobile_scanner: ^5.2.3
   permission_handler: ^11.3.1
   
   # Local Storage
@@ -63,7 +63,7 @@ dependencies:
   shimmer: ^3.0.0
 
   # Audio
-  audioplayers: ^6.6.0
+  audioplayers: ^6.1.0
   
   # Utilities
   intl: ^0.19.0

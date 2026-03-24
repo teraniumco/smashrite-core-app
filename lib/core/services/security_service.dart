@@ -2,6 +2,8 @@ import 'dart:ui';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart';
@@ -9,7 +11,6 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:freerasp/freerasp.dart';
 import 'package:package_info_plus/package_info_plus.dart' as package_info;
-import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 import 'package:smashrite/core/constants/app_constants.dart';
 import 'package:smashrite/core/storage/storage_service.dart';
@@ -20,17 +21,14 @@ class SecurityService {
   static Function()? onMultiWindowDetected;
   static const platform = MethodChannel('com.smashrite.core/violations');
 
-  // Existing callbacks for screenshot/recording/app switching
   static Function(int count, DateTime timestamp)? onScreenshotDetected;
   static Function(bool isRecording)? onScreenRecordingChanged;
   static Function()? onAppSwitched;
   static Function()? onAppResumed;
 
-  // New callbacks for device security violations
   static Function(SecurityViolation violation)? onSecurityViolation;
   static Function()? onDeviceBindingViolation;
 
-  // State management
   static bool _isInitialized = false;
   static Timer? _recordingMonitor;
   static Timer? _periodicSecurityCheck;
@@ -39,16 +37,14 @@ class SecurityService {
 
   static String? _currentQuestionId;
 
-  // Enhanced device security state
   static bool _isDeviceRegistered = false;
   static bool _hasActiveViolation = false;
   static SecurityViolation? _currentViolation;
-  static DeviceIdentity? _deviceIdentity; // Enhanced from DeviceInfo
-  static String? _installationId; // Persistent UUID
+  static DeviceIdentity? _deviceIdentity;
+  static String? _installationId;
   static HardwareProfile? _hardwareProfile;
-  static String? _compositeFingerprint; // Multi-layer hash
+  static String? _compositeFingerprint;
 
-  // Secure storage
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
@@ -58,14 +54,148 @@ class SecurityService {
       ServerConnectionService();
   static ExamServer? _currentServer;
 
-  // Dio client with lazy initialization
+  // ── Dio instances ──────────────────────────────────────────────────────────
+  // _dio        → institution server (set by _configureServerConnection)
+  // _defaultDio → Smashrite cloud API (api.smashrite.com)
   static Dio? _dio;
+  static Dio? _defaultDio;
 
-  static Dio get _apiClient {
-    if (_dio == null) {
+  // Cached SecurityContext — built once, reused for every Dio instance
+  static SecurityContext? _securityContext;
+
+  // ── Secure Dio builder ────────────────────────────────────────────────────
+
+  /// Load the Smashrite CA from bundled assets and build a SecurityContext
+  /// that trusts ONLY that CA (withTrustedRoots: false).
+  /// Called once; result is cached in [_securityContext].
+  static Future<SecurityContext> _buildSecurityContext() async {
+    if (_securityContext != null) return _securityContext!;
+
+    try {
+      final caBytes = await rootBundle.load('assets/certs/smashrite_ca.crt');
+      final context = SecurityContext(withTrustedRoots: false);
+      context.setTrustedCertificatesBytes(caBytes.buffer.asUint8List());
+      _securityContext = context;
+      debugPrint('[SSL] SecurityContext built — Smashrite CA loaded.');
+    } catch (e) {
+      debugPrint('[SSL] CRITICAL: Failed to load CA cert: $e');
+      rethrow; // Do NOT continue without a trusted CA
+    }
+
+    return _securityContext!;
+  }
+
+  /// Apply the Smashrite CA-pinned HttpClient to [dio].
+  /// Must be called right after every Dio instance is created.
+  static Future<void> _applySecureAdapter(Dio dio) async {
+    final context = await _buildSecurityContext();
+
+    (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
+      final client = HttpClient(context: context);
+
+      // Reject anything that does not match our CA — log and refuse
+      client.badCertificateCallback = (
+        X509Certificate cert,
+        String host,
+        int port,
+      ) {
+        debugPrint('[SSL] Rejected cert for unexpected host: $host:$port');
+        return false;
+      };
+
+      return client;
+    };
+
+    debugPrint('[SSL] Secure adapter applied to Dio instance.');
+  }
+
+  /// Force every URL to HTTPS before making a request.
+  static String _enforceHttps(String url) {
+    if (url.startsWith('http://')) {
+      debugPrint('[SSL] Warning: upgrading HTTP → HTTPS for $url');
+      return url.replaceFirst('http://', 'https://');
+    }
+    return url;
+  }
+
+  // ── Default API client (api.smashrite.com) ────────────────────────────────
+
+  /// Lazily build the default cloud API client.
+  /// Returns a Future because applying the secure adapter is async.
+  static Future<Dio> _getDefaultApiClient() async {
+    if (_defaultDio != null) return _defaultDio!;
+
+    _defaultDio = Dio(
+      BaseOptions(
+        baseUrl: _enforceHttps('https://api.smashrite.com/v1'),
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ),
+    );
+
+    // ── Secure adapter ────────────────────────────────────────────────────
+    await _applySecureAdapter(_defaultDio!);
+
+    // ── Auth interceptor ──────────────────────────────────────────────────
+    _defaultDio!.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          final authToken = StorageService.get(AppConstants.accessToken);
+          if (authToken != null && authToken.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $authToken';
+            debugPrint('[API] Auth token attached');
+          }
+          return handler.next(options);
+        },
+        onResponse: (response, handler) => handler.next(response),
+        onError: (DioException error, handler) {
+          _logDioError('[DefaultAPI]', error);
+          return handler.next(error);
+        },
+      ),
+    );
+
+    if (kDebugMode) {
+      _defaultDio!.interceptors.add(
+        LogInterceptor(
+          requestBody: true,
+          responseBody: true,
+          logPrint: (obj) => debugPrint('[DefaultAPI] $obj'),
+        ),
+      );
+    }
+
+    return _defaultDio!;
+  }
+
+  // ── Institution server client (_dio) ──────────────────────────────────────
+
+  static Future<void> _configureServerConnection({ExamServer? server}) async {
+    try {
+      debugPrint('[Server] Configuring server connection...');
+
+      ExamServer? targetServer = server;
+      targetServer ??= await _serverService.getSavedServer();
+
+      _currentServer = targetServer;
+
+      if (targetServer == null) {
+        debugPrint(
+          '[Server] WARNING: No server configured — institution API calls will fail.',
+        );
+        return;
+      }
+
+      final baseUrl = _enforceHttps(targetServer.url);
+      debugPrint('[Server] Target URL: $baseUrl');
+
       _dio = Dio(
         BaseOptions(
-          baseUrl: 'https://api.smashrite.com/v1',
+          baseUrl: baseUrl,
           connectTimeout: const Duration(seconds: 30),
           receiveTimeout: const Duration(seconds: 30),
           headers: {
@@ -75,23 +205,22 @@ class SecurityService {
         ),
       );
 
+      // ── Secure adapter ──────────────────────────────────────────────────
+      await _applySecureAdapter(_dio!);
+
+      // ── Auth interceptor ────────────────────────────────────────────────
       _dio!.interceptors.add(
         InterceptorsWrapper(
           onRequest: (options, handler) {
             final authToken = StorageService.get(AppConstants.accessToken);
-
             if (authToken != null && authToken.isNotEmpty) {
               options.headers['Authorization'] = 'Bearer $authToken';
-              debugPrint('🔑 Auth token added to security request');
             }
-
             return handler.next(options);
           },
-          onResponse: (response, handler) {
-            return handler.next(response);
-          },
+          onResponse: (response, handler) => handler.next(response),
           onError: (DioException error, handler) {
-            debugPrint('❌ Security API error: ${error.message}');
+            _logDioError('[InstitutionAPI]', error);
             return handler.next(error);
           },
         ),
@@ -102,16 +231,30 @@ class SecurityService {
           LogInterceptor(
             requestBody: true,
             responseBody: true,
-            logPrint: (obj) => debugPrint('🔒 Security API: $obj'),
+            logPrint: (obj) => debugPrint('[InstitutionAPI] $obj'),
           ),
         );
       }
-    }
 
-    return _dio!;
+      debugPrint('[Server] Institution Dio configured: $baseUrl');
+    } catch (e) {
+      debugPrint('[Server] ERROR configuring server connection: $e');
+    }
   }
 
-  // Enhanced getters
+  /// Shared DioException logger with SSL-specific messaging
+  static void _logDioError(String tag, DioException error) {
+    if (error.error is HandshakeException) {
+      debugPrint(
+        '$tag SSL HandshakeException — cert may not be signed by Smashrite CA: ${error.message}',
+      );
+    } else {
+      debugPrint('$tag DioException [${error.type}]: ${error.message}');
+    }
+  }
+
+  // ── Public API ─────────────────────────────────────────────────────────────
+
   static bool get isInitialized => _isInitialized;
   static bool get isDeviceRegistered => _isDeviceRegistered;
   static bool get hasActiveViolation => _hasActiveViolation;
@@ -121,187 +264,104 @@ class SecurityService {
   static String? get compositeFingerprint => _compositeFingerprint;
   static HardwareProfile? get hardwareProfile => _hardwareProfile;
 
-  /// Configure server connection
   static Future<void> configureServer(ExamServer server) async {
     await _configureServerConnection(server: server);
-    debugPrint('✅ Server reconfigured: ${server.url}');
+    debugPrint('[Server] Reconfigured: ${server.url}');
   }
 
-  /// Set current question index for violation tracking
   static void setCurrentQuestionId(String? questionId) {
     _currentQuestionId = questionId;
-    debugPrint('📍 Current question index updated: $questionId');
+    debugPrint('[Security] Current question ID: $questionId');
   }
 
-  /// Initialize security monitoring with enhanced fingerprinting
+  /// Initialize security monitoring
   static Future<void> initialize({ExamServer? server}) async {
     if (_isInitialized) {
-      if (server != null) {
-        await configureServer(server);
-      }
+      if (server != null) await configureServer(server);
       return;
     }
 
-    debugPrint('🔒 Initializing enhanced security service...');
+    debugPrint('[Security] Initializing enhanced security service...');
 
     try {
-      // 0. Configure server connection
+      // 0. Server connection (institution Dio)
       await _configureServerConnection(server: server);
 
-      // 1. Get or create installation ID (Layer 1)
+      // 1. Installation ID
       await _initializeInstallationId();
-      debugPrint('✅ Installation ID: ${_installationId?.substring(0, 8)}...');
-
-      // 2. Collect hardware profile (Layer 2)
-      await _collectHardwareProfile();
-      debugPrint('✅ Hardware profile collected');
-
-      // 3. Generate composite fingerprint (Layer 3)
-      await _generateCompositeFingerprint();
       debugPrint(
-        '✅ Composite fingerprint: ${_compositeFingerprint?.substring(0, 16)}...',
+        '[Security] Installation ID: ${_installationId?.substring(0, 8)}...',
       );
 
-      // Check authentication status
+      // 2. Hardware profile
+      await _collectHardwareProfile();
+      debugPrint('[Security] Hardware profile collected.');
+
+      // 3. Composite fingerprint
+      await _generateCompositeFingerprint();
+      debugPrint(
+        '[Security] Fingerprint: ${_compositeFingerprint?.substring(0, 16)}...',
+      );
+
       final accessToken = StorageService.get<String>(AppConstants.accessToken);
       final isAuthenticated = accessToken != null && accessToken.isNotEmpty;
 
       if (isAuthenticated) {
-        // 4. Check device registration & consistency (Layer 4)
+        // 4. Device registration
         await _checkDeviceRegistration();
-        debugPrint('✅ Device registration status: $_isDeviceRegistered');
+        debugPrint('[Security] Device registered: $_isDeviceRegistered');
 
-        // 5. Perform consistency check
+        // 5. Consistency check
         final consistency = await checkDeviceConsistency();
         if (!consistency.isValid) {
-          debugPrint('⚠️ Device consistency issues detected:');
-          for (var violation in consistency.violations) {
-            debugPrint('   - ${violation.type}: ${violation.description}');
+          debugPrint('[Security] Consistency issues detected:');
+          for (var v in consistency.violations) {
+            debugPrint('   - ${v.type}: ${v.description}');
           }
         }
       } else {
         debugPrint(
-          '[!! WARNING !!] User not authenticated, skipping device checks',
+          '[Security] WARNING: Not authenticated — skipping device checks.',
         );
       }
 
-      // 6. Initialize FreeRASP
+      // 6. FreeRASP
       await _initializeFreeRASP();
-      debugPrint('✅ FreeRASP initialized');
+      debugPrint('[Security] FreeRASP initialized.');
 
-      // 7. Setup existing screenshot/recording detection
+      // 7. Native monitoring
       await _setupNativeSecurityMonitoring();
 
       _isInitialized = true;
-      debugPrint('✅ Enhanced security service fully initialized');
+      debugPrint('[Security] Fully initialized.');
     } catch (e) {
-      debugPrint('❌ Security initialization failed: $e');
+      debugPrint('[Security] Initialization failed: $e');
       rethrow;
     }
   }
 
-  static Future<void> _configureServerConnection({ExamServer? server}) async {
-    try {
-      debugPrint('🔍 Configuring server connection...');
-      debugPrint('   - Provided server: ${server?.url ?? "null"}');
+  // ── Device fingerprinting ─────────────────────────────────────────────────
 
-      ExamServer? targetServer = server;
-
-      if (targetServer == null) {
-        debugPrint('   - No server provided, checking storage...');
-        targetServer = await _serverService.getSavedServer();
-        debugPrint('   - Loaded from storage: ${targetServer?.url ?? "null"}');
-      }
-
-      targetServer ??= await _serverService.getSavedServer();
-
-      _currentServer = targetServer;
-
-      if (targetServer != null) {
-        _dio = Dio(
-          BaseOptions(
-            baseUrl: targetServer.url,
-            connectTimeout: const Duration(seconds: 30),
-            receiveTimeout: const Duration(seconds: 30),
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-          ),
-        );
-
-        _dio!.interceptors.add(
-          InterceptorsWrapper(
-            onRequest: (options, handler) {
-              final authToken = StorageService.get(AppConstants.accessToken);
-
-              if (authToken != null && authToken.isNotEmpty) {
-                options.headers['Authorization'] = 'Bearer $authToken';
-              }
-
-              return handler.next(options);
-            },
-            onResponse: (response, handler) {
-              return handler.next(response);
-            },
-            onError: (DioException error, handler) {
-              debugPrint('❌ Security API error: ${error.message}');
-              return handler.next(error);
-            },
-          ),
-        );
-
-        if (kDebugMode) {
-          _dio!.interceptors.add(
-            LogInterceptor(
-              requestBody: true,
-              responseBody: true,
-              logPrint: (obj) => debugPrint('🔒 Security API: $obj'),
-            ),
-          );
-        }
-
-        debugPrint(
-          '✅ Security service configured with server: ${targetServer.url}',
-        );
-      } else {
-        debugPrint('[!! WARNING !!] No server provided, using default URL');
-      }
-    } catch (error) {
-      debugPrint('[!! WARNING !!] Error configuring server connection: $error');
-    }
-  }
-
-  /// LAYER 1: Initialize or retrieve installation ID (UUID)
   static Future<void> _initializeInstallationId() async {
-    // Try to get existing installation ID
     String? storedId = await _secureStorage.read(key: 'installation_id');
-
     if (storedId == null || storedId.isEmpty) {
-      // Generate new UUID
       const uuid = Uuid();
       storedId = uuid.v4();
-
-      // Store persistently
       await _secureStorage.write(key: 'installation_id', value: storedId);
-      debugPrint('🆕 New installation ID created');
+      debugPrint('[Security] New installation ID created.');
     } else {
-      debugPrint('♻️ Existing installation ID loaded');
+      debugPrint('[Security] Existing installation ID loaded.');
     }
-
     _installationId = storedId;
   }
 
-  /// LAYER 2: Collect comprehensive hardware profile (focused on stable identifiers)
   static Future<void> _collectHardwareProfile() async {
     final deviceInfoPlugin = DeviceInfoPlugin();
-    final packageInfo = await package_info.PackageInfo.fromPlatform();
+    final pkgInfo = await package_info.PackageInfo.fromPlatform();
 
     if (Platform.isAndroid) {
       final androidInfo = await deviceInfoPlugin.androidInfo;
-
       _hardwareProfile = HardwareProfile(
-        // Core identifiers (these don't change)
         deviceId: androidInfo.id,
         brand: androidInfo.brand,
         manufacturer: androidInfo.manufacturer,
@@ -309,32 +369,22 @@ class SecurityService {
         hardware: androidInfo.hardware,
         product: androidInfo.product,
         device: androidInfo.device,
-
-        // System info
         osVersion: 'Android ${androidInfo.version.release}',
         sdkInt: androidInfo.version.sdkInt,
-        
-        // Display metrics (use 0 as placeholder - not critical for fingerprinting)
         screenWidth: 0,
         screenHeight: 0,
         screenDensity: 0,
-
-        // Additional Android-specific (stable identifiers)
         supportedAbis: androidInfo.supportedAbis,
         board: androidInfo.board,
         bootloader: androidInfo.bootloader,
         fingerprint: androidInfo.fingerprint,
         host: androidInfo.host,
-
-        // App info
-        appVersion: packageInfo.version,
-        appBuildNumber: packageInfo.buildNumber,
+        appVersion: pkgInfo.version,
+        appBuildNumber: pkgInfo.buildNumber,
       );
     } else if (Platform.isIOS) {
       final iosInfo = await deviceInfoPlugin.iosInfo;
-
       _hardwareProfile = HardwareProfile(
-        // Core identifiers
         deviceId: iosInfo.identifierForVendor ?? '',
         brand: 'Apple',
         manufacturer: 'Apple',
@@ -342,28 +392,20 @@ class SecurityService {
         hardware: iosInfo.utsname.machine,
         product: iosInfo.model,
         device: iosInfo.name,
-
-        // System info
         osVersion: 'iOS ${iosInfo.systemVersion}',
-        
-        // Display metrics (not available on iOS easily)
         screenWidth: 0,
         screenHeight: 0,
         screenDensity: 0,
-
-        // App info
-        appVersion: packageInfo.version,
-        appBuildNumber: packageInfo.buildNumber,
+        appVersion: pkgInfo.version,
+        appBuildNumber: pkgInfo.buildNumber,
       );
     }
 
-    // Store hardware profile
     await _secureStorage.write(
       key: 'hardware_profile',
       value: jsonEncode(_hardwareProfile!.toJson()),
     );
 
-    // Create device identity
     _deviceIdentity = DeviceIdentity(
       installationId: _installationId!,
       deviceName: _hardwareProfile!.device,
@@ -373,11 +415,8 @@ class SecurityService {
       registeredAt: DateTime.now(),
     );
   }
-    
-  
-  /// LAYER 3: Generate composite fingerprint from multiple signals
+
   static Future<void> _generateCompositeFingerprint() async {
-    // Combine installation ID + hardware profile + contextual data
     final fingerprintData = {
       'installation_id': _installationId,
       'hardware': {
@@ -412,20 +451,16 @@ class SecurityService {
     final jsonString = json.encode(fingerprintData);
     final bytes = utf8.encode(jsonString);
     final digest = sha256.convert(bytes);
-
     _compositeFingerprint = digest.toString();
 
-    // Store composite fingerprint
     await _secureStorage.write(
       key: 'composite_fingerprint',
       value: _compositeFingerprint,
     );
   }
 
-  /// LAYER 4: Check device consistency (detect hardware changes, device swaps)
   static Future<DeviceConsistencyReport> checkDeviceConsistency() async {
     try {
-      // Load stored fingerprints
       final storedInstallationId = await _secureStorage.read(
         key: 'installation_id',
       );
@@ -438,78 +473,72 @@ class SecurityService {
 
       final violations = <SecurityViolation>[];
 
-      // Check 1: Installation ID consistency
       final installIdMatch = storedInstallationId == _installationId;
       if (!installIdMatch) {
-        violations.add(SecurityViolation(
-          type: ViolationType.deviceMismatch,
-          severity: ViolationSeverity.critical,
-          description: 'Installation ID mismatch - app may have been reinstalled on different device',
-          detectedAt: DateTime.now(),
-          metadata: {
-            'expected': storedInstallationId,
-            'actual': _installationId,
-          },
-        ));
+        violations.add(
+          SecurityViolation(
+            type: ViolationType.deviceMismatch,
+            severity: ViolationSeverity.critical,
+            description: 'Installation ID mismatch detected.',
+            detectedAt: DateTime.now(),
+            metadata: {
+              'expected': storedInstallationId,
+              'actual': _installationId,
+            },
+          ),
+        );
       }
 
-      // Check 2: Composite fingerprint consistency
       final fingerprintMatch = storedFingerprint == _compositeFingerprint;
       if (!fingerprintMatch) {
-        violations.add(SecurityViolation(
-          type: ViolationType.deviceMismatch,
-          severity: ViolationSeverity.high,
-          description: 'Device fingerprint mismatch detected',
-          detectedAt: DateTime.now(),
-          metadata: {
-            'expected_hash': storedFingerprint?.substring(0, 16),
-            'actual_hash': _compositeFingerprint?.substring(0, 16),
-          },
-        ));
+        violations.add(
+          SecurityViolation(
+            type: ViolationType.deviceMismatch,
+            severity: ViolationSeverity.high,
+            description: 'Device fingerprint mismatch detected.',
+            detectedAt: DateTime.now(),
+            metadata: {
+              'expected_hash': storedFingerprint?.substring(0, 16),
+              'actual_hash': _compositeFingerprint?.substring(0, 16),
+            },
+          ),
+        );
       }
 
-      // Check 3: Critical hardware fields (should never change)
       if (storedHwProfileJson != null) {
         final storedProfile = HardwareProfile.fromJson(
           jsonDecode(storedHwProfileJson),
         );
-
-        final criticalFieldsChanged = <String>[];
-
-        if (storedProfile.manufacturer != _hardwareProfile!.manufacturer) {
-          criticalFieldsChanged.add('manufacturer');
-        }
-        if (storedProfile.model != _hardwareProfile!.model) {
-          criticalFieldsChanged.add('model');
-        }
-        if (storedProfile.brand != _hardwareProfile!.brand) {
-          criticalFieldsChanged.add('brand');
-        }
-
-        if (criticalFieldsChanged.isNotEmpty) {
-          violations.add(SecurityViolation(
-            type: ViolationType.suspiciousBehavior,
-            severity: ViolationSeverity.critical,
-            description: 'Critical hardware fields changed: ${criticalFieldsChanged.join(", ")}',
-            detectedAt: DateTime.now(),
-            metadata: {
-              'changed_fields': criticalFieldsChanged,
-            },
-          ));
+        final changed = <String>[];
+        if (storedProfile.manufacturer != _hardwareProfile!.manufacturer)
+          changed.add('manufacturer');
+        if (storedProfile.model != _hardwareProfile!.model)
+          changed.add('model');
+        if (storedProfile.brand != _hardwareProfile!.brand)
+          changed.add('brand');
+        if (changed.isNotEmpty) {
+          violations.add(
+            SecurityViolation(
+              type: ViolationType.suspiciousBehavior,
+              severity: ViolationSeverity.critical,
+              description:
+                  'Critical hardware fields changed: ${changed.join(", ")}',
+              detectedAt: DateTime.now(),
+              metadata: {'changed_fields': changed},
+            ),
+          );
         }
       }
 
-      final isValid = violations.isEmpty;
-
       return DeviceConsistencyReport(
-        isValid: isValid,
+        isValid: violations.isEmpty,
         installationIdMatch: installIdMatch,
         fingerprintMatch: fingerprintMatch,
         violations: violations,
         checkedAt: DateTime.now(),
       );
     } catch (e) {
-      debugPrint('❌ Device consistency check failed: $e');
+      debugPrint('[Security] Consistency check failed: $e');
       return DeviceConsistencyReport(
         isValid: false,
         installationIdMatch: false,
@@ -527,18 +556,26 @@ class SecurityService {
     }
   }
 
-  /// Check if device is registered on backend
+  /// Verify device registration against the institution server backend
   static Future<void> _checkDeviceRegistration() async {
     try {
       final studentId = await _secureStorage.read(key: 'student_id');
-
       if (_compositeFingerprint == null || studentId == null) {
         _isDeviceRegistered = false;
         return;
       }
 
-      // Verify with backend using composite fingerprint
-      final response = await _apiClient.post(
+      // Use institution server Dio — requires CA cert
+      final client = _dio;
+      if (client == null) {
+        debugPrint(
+          '[Security] No institution server configured for device check.',
+        );
+        _isDeviceRegistered = false;
+        return;
+      }
+
+      final response = await client.post(
         '/security/verify-device',
         data: {
           'student_id': int.parse(studentId),
@@ -557,34 +594,13 @@ class SecurityService {
         );
       }
     } catch (e) {
-      debugPrint('Device registration check failed: $e');
+      debugPrint('[Security] Device registration check failed: $e');
       _isDeviceRegistered = false;
     }
   }
 
-  // Force immediate FreeRASP checks
-  static Future<void> performImmediateSecurityCheck() async {
-    debugPrint('🔍 Performing immediate security check...');
+  // ── FreeRASP ──────────────────────────────────────────────────────────────
 
-    try {
-      await Future.delayed(const Duration(seconds: 2));
-
-      debugPrint('✅ Security check wait complete');
-
-      debugPrint('📊 Security State:');
-      debugPrint('   - Has active violation: $_hasActiveViolation');
-      debugPrint('   - Current violation: ${_currentViolation?.type}');
-      debugPrint('   - Device registered: $_isDeviceRegistered');
-
-      // Perform consistency check
-      final consistency = await checkDeviceConsistency();
-      debugPrint('   - Device consistency: ${consistency.isValid}');
-    } catch (e) {
-      debugPrint('❌ Immediate security check failed: $e');
-    }
-  }
-
-  /// Initialize FreeRASP for advanced threat detection
   static Future<void> _initializeFreeRASP() async {
     try {
       final config = TalsecConfig(
@@ -592,7 +608,7 @@ class SecurityService {
           packageName: 'com.smashrite.core',
           signingCertHashes: [
             '0gJLOReCKvmh/rfIf6gHVGGnMIC2T4jKmRh83zugZDM=',
-            'AVfu9jdGjC74M8zw2ubXZ4K8X2m0JcBz+h2u0+UII5U=',
+            '8+WltjxTGAciGT7MECW+1MNT3WQCOHZfGt4HQG37SPU=',
           ],
         ),
         iosConfig: IOSConfig(
@@ -601,6 +617,7 @@ class SecurityService {
         ),
         watcherMail: '',
         isProd: kReleaseMode,
+        killOnBypass: true, // NEW: kills app if attacker suppresses callbacks
       );
 
       final callback = ThreatCallback(
@@ -612,10 +629,13 @@ class SecurityService {
         onHooks: () => _handleThreat('hooks'),
         onPasscode: () => _handleThreat('passcode'),
         onPrivilegedAccess: () => _handleThreat('privilegedAccess'),
-        onSecureHardwareNotAvailable:
-            () => _handleThreat('secureHardwareNotAvailable'),
+        onSecureHardwareNotAvailable: () => _handleThreat('secureHardwareNotAvailable'),
         onSimulator: () => _handleThreat('simulator'),
-        // onUnofficialStore: () => _handleThreat('unofficialStore'),
+        onUnofficialStore: () => _handleThreat('unofficialStore'),
+        onDevMode: () => _handleThreat('devMode'),
+        onSystemVPN: () => _handleThreat('systemVPN'),
+        onTimeSpoofing: () => _handleThreat('timeSpoofing'),
+        onLocationSpoofing: () => _handleThreat('locationSpoofing'),
       );
 
       Talsec.instance.attachListener(callback);
@@ -625,25 +645,20 @@ class SecurityService {
           .timeout(
             const Duration(seconds: 5),
             onTimeout: () {
-              debugPrint(
-                '[!! WARNING !!] FreeRASP start timed out, continuing anyway',
-              );
+              debugPrint('[Security] FreeRASP start timed out — continuing.');
             },
           );
 
-      debugPrint('✅ FreeRASP started successfully');
+      debugPrint('[Security] FreeRASP started.');
     } on TimeoutException catch (e) {
-      debugPrint('⏱️ FreeRASP initialization timed out: $e');
-      debugPrint('[!! WARNING !!] Continuing with basic security features');
+      debugPrint('[Security] FreeRASP timeout: $e — continuing with basic security.');
     } catch (e) {
-      debugPrint('[!! WARNING !!] FreeRASP initialization failed: $e');
-      debugPrint('[!! WARNING !!] Continuing with basic security features');
+      debugPrint('[Security] FreeRASP failed: $e — continuing with basic security.');
     }
   }
 
-  /// Handle FreeRASP threat detection
   static Future<void> _handleThreat(String threatType) async {
-    debugPrint('[!! WARNING !!] SECURITY THREAT DETECTED: $threatType');
+    debugPrint('[Security] THREAT DETECTED: $threatType');
 
     final violation = SecurityViolation(
       type: _mapThreatToViolationType(threatType),
@@ -661,10 +676,8 @@ class SecurityService {
     );
 
     await _reportSecurityViolation(violation);
-
     _hasActiveViolation = true;
     _currentViolation = violation;
-
     onSecurityViolation?.call(violation);
 
     if (threatType == 'deviceBinding' || threatType == 'deviceID') {
@@ -687,6 +700,10 @@ class SecurityService {
       case 'deviceID':
         return ViolationType.deviceMismatch;
       case 'hooks':
+      case 'devMode':         
+      case 'timeSpoofing':    
+      case 'locationSpoofing':
+      case 'systemVPN':       
         return ViolationType.suspiciousBehavior;
       default:
         return ViolationType.suspiciousBehavior;
@@ -713,40 +730,40 @@ class SecurityService {
   static String _getThreatDescription(String threat) {
     switch (threat) {
       case 'privilegedAccess':
-        return 'Root/Jailbreak access detected on this device. Smashrite cannot run on rooted/jailbroken devices for security reasons.';
+        return 'Root/Jailbreak detected. Smashrite cannot run on rooted/jailbroken devices.';
       case 'debug':
-        return 'Debugger detected. Please close all debugging tools and restart the app.';
+        return 'Debugger detected. Close all debugging tools and restart the app.';
       case 'simulator':
-        return 'Emulator/Simulator detected. Smashrite must run on physical devices only.';
+        return 'Emulator detected. Smashrite must run on a physical device.';
       case 'appIntegrity':
-        return 'App tampering detected. Please reinstall the official Smashrite app from Google Play Store or App Store.';
+        return 'App tampering detected. Reinstall the official Smashrite app.';
       case 'deviceBinding':
       case 'deviceID':
-        return 'Device mismatch detected. This device is not registered for your account.';
+        return 'Device mismatch. This device is not registered for your account.';
       case 'hooks':
-        return 'Suspicious app behavior detected. Please ensure no third-party tools are running.';
+        return 'Suspicious app behavior detected. Ensure no third-party tools are running.';
       case 'unofficialStore':
-        return 'App not installed from official store. Please download from Google Play Store or App Store.';
+        return 'App not installed from official store. Download from Google Play or App Store.';
       case 'passcode':
-        return 'Device passcode is disabled. Please enable device passcode for security.';
+        return 'Device passcode is disabled. Enable a passcode for security.';
       default:
-        return 'Security violation detected. Please contact support for assistance.';
+        return 'Security violation detected. Contact support for assistance.';
     }
   }
 
-  /// Setup existing native security monitoring
+  // ── Native monitoring ─────────────────────────────────────────────────────
+
   static Future<void> _setupNativeSecurityMonitoring() async {
     platform.setMethodCallHandler(_handleMethodCall);
-
     try {
       final result = await platform.invokeMethod('enableScreenSecurity');
-      if (result == true) {
-        debugPrint('✅ Screen security enabled');
-      } else {
-        debugPrint('[!! WARNING !!] Screen security not supported');
-      }
+      debugPrint(
+        result == true
+            ? '[Security] Screen security enabled.'
+            : '[Security] Screen security not supported.',
+      );
     } catch (e) {
-      debugPrint('❌ Error enabling screen security: $e');
+      debugPrint('[Security] Error enabling screen security: $e');
     }
 
     if (Platform.isIOS) {
@@ -755,15 +772,13 @@ class SecurityService {
   }
 
   static Future<dynamic> _handleMethodCall(MethodCall call) async {
-    debugPrint('📱 Native callback: ${call.method}');
-
     switch (call.method) {
       case 'onScreenshotDetected':
         final count = call.arguments['count'] as int;
         final timestamp = DateTime.fromMillisecondsSinceEpoch(
           ((call.arguments['timestamp'] as double) * 1000).toInt(),
         );
-        debugPrint('📸 Screenshot detected! Count: $count');
+        debugPrint('[Security] Screenshot detected! Count: $count');
         onScreenshotDetected?.call(count, timestamp);
         await _reportScreenshotViolation(count, timestamp);
         break;
@@ -771,44 +786,39 @@ class SecurityService {
       case 'onScreenRecordingChanged':
         final isRecording = call.arguments['isRecording'] as bool;
         debugPrint(
-          '🎥 Screen recording ${isRecording ? "STARTED" : "STOPPED"}',
+          '[Security] Screen recording ${isRecording ? "STARTED" : "STOPPED"}',
         );
         onScreenRecordingChanged?.call(isRecording);
-        if (isRecording) {
-          await _reportScreenRecordingViolation();
-        }
+        if (isRecording) await _reportScreenRecordingViolation();
         break;
 
       case 'onMultiWindowDetected':
         final timestamp = DateTime.fromMillisecondsSinceEpoch(
           ((call.arguments['timestamp'] as double) * 1000).toInt(),
         );
-        debugPrint('🚨 CRITICAL: Multi-window mode detected at $timestamp');
+        debugPrint('[Security] CRITICAL: Multi-window detected at $timestamp');
         onMultiWindowDetected?.call();
         await _reportMultiWindowViolation(timestamp);
         break;
     }
   }
 
-
   static Future<void> _reportMultiWindowViolation(DateTime timestamp) async {
-    final violation = SecurityViolation(
-      type: ViolationType.suspiciousBehavior,
-      severity: ViolationSeverity.critical,
-      description: 'Split-screen/Multi-window mode detected during exam',
-      detectedAt: timestamp,
-      metadata: {
-        'composite_fingerprint': _compositeFingerprint,
-        'question_index': _currentQuestionId,
-      },
+    await _reportSecurityViolation(
+      SecurityViolation(
+        type: ViolationType.suspiciousBehavior,
+        severity: ViolationSeverity.critical,
+        description: 'Split-screen/Multi-window mode detected during exam.',
+        detectedAt: timestamp,
+        metadata: {
+          'composite_fingerprint': _compositeFingerprint,
+          'question_index': _currentQuestionId,
+        },
+      ),
     );
-
-    await _reportSecurityViolation(violation);
   }
 
   static void _startScreenRecordingMonitor() {
-    debugPrint('🔍 Starting iOS screen recording monitor...');
-
     _recordingMonitor?.cancel();
     _recordingMonitor = Timer.periodic(const Duration(seconds: 2), (
       timer,
@@ -819,15 +829,12 @@ class SecurityService {
           onScreenRecordingChanged?.call(true);
           await _reportScreenRecordingViolation();
         }
-      } catch (e) {
-        // Silently ignore
-      }
+      } catch (_) {}
     });
   }
 
   static void _startPeriodicSecurityChecks() {
     _periodicSecurityCheck?.cancel();
-
     _periodicSecurityCheck = Timer.periodic(const Duration(seconds: 30), (
       timer,
     ) async {
@@ -845,11 +852,13 @@ class SecurityService {
 
       if (studentId == null || deviceId == null) return;
 
-      // Perform consistency check
       final consistency = await checkDeviceConsistency();
-      final integrityCheckPassed = !_hasActiveViolation;
 
-      await _apiClient.post(
+      // Use institution Dio for periodic checks
+      final client = _dio;
+      if (client == null) return;
+
+      await client.post(
         '/security/log-check',
         data: {
           'student_id': int.parse(studentId),
@@ -858,18 +867,19 @@ class SecurityService {
           'device_id': int.parse(deviceId),
           'installation_id': _installationId,
           'root_check_passed': !_hasActiveViolation,
-          'integrity_check_passed': integrityCheckPassed,
+          'integrity_check_passed': !_hasActiveViolation,
           'device_consistency_valid': consistency.isValid,
           'composite_fingerprint': _compositeFingerprint,
           'checked_at': DateTime.now().toIso8601String(),
         },
       );
     } catch (e) {
-      debugPrint('Periodic check failed: $e');
+      debugPrint('[Security] Periodic check failed: $e');
     }
   }
 
-  /// Report violation to backend
+  // ── Violation reporting ───────────────────────────────────────────────────
+
   static Future<void> reportViolation({
     required ViolationType type,
     required ViolationSeverity severity,
@@ -884,7 +894,7 @@ class SecurityService {
       );
       final deviceId = await _secureStorage.read(key: 'registered_device_id');
 
-      final violationData = {
+      final payload = {
         'student_id': studentId != null ? int.parse(studentId) : null,
         'exam_attempt_id':
             examSessionId != null ? int.parse(examSessionId) : null,
@@ -903,10 +913,20 @@ class SecurityService {
         'detected_at': DateTime.now().toIso8601String(),
       };
 
-      await _apiClient.post('/security/report-violation', data: violationData);
-      debugPrint('✅ Violation reported: ${type.name} (${severity.name})');
+      // Use institution server Dio — violations reported to local server
+      final client = _dio;
+      if (client != null) {
+        await client.post('/security/report-violation', data: payload);
+        debugPrint(
+          '[Security] Violation reported: ${type.name} (${severity.name})',
+        );
+      } else {
+        debugPrint(
+          '[Security] WARNING: No Dio client — violation not reported remotely.',
+        );
+      }
     } catch (e) {
-      debugPrint('❌ Failed to report violation: $e');
+      debugPrint('[Security] Failed to report violation: $e');
     }
   }
 
@@ -925,80 +945,46 @@ class SecurityService {
     int count,
     DateTime timestamp,
   ) async {
-    final violation = SecurityViolation(
-      type: ViolationType.screenshot,
-      severity: ViolationSeverity.high,
-      description: 'Screenshot attempt detected during exam',
-      detectedAt: timestamp,
-      metadata: {
-        'screenshot_count': count,
-        'composite_fingerprint': _compositeFingerprint,
-        'question_index': _currentQuestionId,
-      },
+    await _reportSecurityViolation(
+      SecurityViolation(
+        type: ViolationType.screenshot,
+        severity: ViolationSeverity.high,
+        description: 'Screenshot attempt detected during exam.',
+        detectedAt: timestamp,
+        metadata: {
+          'screenshot_count': count,
+          'composite_fingerprint': _compositeFingerprint,
+          'question_index': _currentQuestionId,
+        },
+      ),
     );
-
-    await _reportSecurityViolation(violation);
   }
 
   static Future<void> _reportScreenRecordingViolation() async {
-    final violation = SecurityViolation(
-      type: ViolationType.screenRecording,
-      severity: ViolationSeverity.critical,
-      description: 'Screen recording detected during exam',
-      detectedAt: DateTime.now(),
-      metadata: {'composite_fingerprint': _compositeFingerprint, 
-        'question_index': _currentQuestionId,
-      },
+    await _reportSecurityViolation(
+      SecurityViolation(
+        type: ViolationType.screenRecording,
+        severity: ViolationSeverity.critical,
+        description: 'Screen recording detected during exam.',
+        detectedAt: DateTime.now(),
+        metadata: {
+          'composite_fingerprint': _compositeFingerprint,
+          'question_index': _currentQuestionId,
+        },
+      ),
     );
-
-    await _reportSecurityViolation(violation);
   }
 
-  static void handleAppLifecycleChange(AppLifecycleState state) {
-    debugPrint('🔄 App lifecycle: $state');
+  // ── Device registration ───────────────────────────────────────────────────
 
-    switch (state) {
-      case AppLifecycleState.paused:
-        if (!_isInBackground) {
-          final now = DateTime.now();
-
-          if (_lastAppSwitchTime == null ||
-              now.difference(_lastAppSwitchTime!).inSeconds >= 2) {
-            _isInBackground = true;
-            _lastAppSwitchTime = now;
-            debugPrint('[!! WARNING !!] APP SWITCHED - User left exam!');
-            onAppSwitched?.call();
-          }
-        }
-        break;
-
-      case AppLifecycleState.resumed:
-        _isInBackground = false;
-        debugPrint('✅ App resumed');
-        onAppResumed?.call();
-        break;
-
-      case AppLifecycleState.inactive:
-        debugPrint('⏸️ App inactive (transitioning)');
-        break;
-
-      case AppLifecycleState.detached:
-        debugPrint('[!! WARNING !!] App detached');
-        break;
-
-      case AppLifecycleState.hidden:
-        debugPrint('[!! WARNING !!] App hidden');
-        break;
-    }
-  }
-
-
-  /// Enhanced device registration with multi-layer fingerprinting
   static Future<Map<String, dynamic>> registerDevice({
     required int studentId,
   }) async {
     try {
-      final response = await _apiClient.post(
+      final client = _dio;
+      if (client == null) throw Exception('No institution server configured.');
+
+      final response = await client.post(
         '/security/register-device',
         data: {
           'student_id': studentId,
@@ -1018,14 +1004,13 @@ class SecurityService {
           key: 'registered_device_id',
           value: response.data['device_id'].toString(),
         );
-
         _isDeviceRegistered = true;
-        debugPrint('✅ Device registered successfully');
+        debugPrint('[Security] Device registered successfully.');
       }
 
       return response.data;
     } catch (e) {
-      debugPrint('❌ Device registration failed: $e');
+      debugPrint('[Security] Device registration failed: $e');
       rethrow;
     }
   }
@@ -1033,31 +1018,71 @@ class SecurityService {
   static Future<List<Map<String, dynamic>>> getStudentDevices(
     int studentId,
   ) async {
+    final client = _dio ?? await _getDefaultApiClient();
+    final response = await client.get('/security/student-devices/$studentId');
+    return List<Map<String, dynamic>>.from(response.data['devices']);
+  }
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  static void handleAppLifecycleChange(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.paused:
+        if (!_isInBackground) {
+          final now = DateTime.now();
+          if (_lastAppSwitchTime == null ||
+              now.difference(_lastAppSwitchTime!).inSeconds >= 2) {
+            _isInBackground = true;
+            _lastAppSwitchTime = now;
+            debugPrint('[Security] App switched — user left exam.');
+            onAppSwitched?.call();
+          }
+        }
+        break;
+      case AppLifecycleState.resumed:
+        _isInBackground = false;
+        debugPrint('[Security] App resumed.');
+        onAppResumed?.call();
+        break;
+      case AppLifecycleState.inactive:
+        debugPrint('[Security] App inactive.');
+        break;
+      case AppLifecycleState.detached:
+        debugPrint('[Security] App detached.');
+        break;
+      case AppLifecycleState.hidden:
+        debugPrint('[Security] App hidden.');
+        break;
+    }
+  }
+
+  static Future<void> performImmediateSecurityCheck() async {
+    debugPrint('[Security] Performing immediate security check...');
     try {
-      final response = await _apiClient.get(
-        '/security/student-devices/$studentId',
-      );
-      return List<Map<String, dynamic>>.from(response.data['devices']);
+      await Future.delayed(const Duration(seconds: 2));
+      final consistency = await checkDeviceConsistency();
+      debugPrint('[Security] Has violation: $_hasActiveViolation');
+      debugPrint('[Security] Violation type: ${_currentViolation?.type}');
+      debugPrint('[Security] Device registered: $_isDeviceRegistered');
+      debugPrint('[Security] Consistency valid: ${consistency.isValid}');
     } catch (e) {
-      rethrow;
+      debugPrint('[Security] Immediate check failed: $e');
     }
   }
 
   static void clearViolation() {
     _hasActiveViolation = false;
     _currentViolation = null;
-    debugPrint('✅ Security violation cleared');
+    debugPrint('[Security] Violation cleared.');
   }
 
   static Future<void> disable() async {
-    debugPrint('🔓 Disabling security service...');
-
+    debugPrint('[Security] Disabling security service...');
     try {
       await platform.invokeMethod('disableScreenSecurity');
     } catch (e) {
-      debugPrint('Error disabling screen security: $e');
+      debugPrint('[Security] Error disabling screen security: $e');
     }
-
     _recordingMonitor?.cancel();
     _periodicSecurityCheck?.cancel();
     _isInitialized = false;
@@ -1065,11 +1090,10 @@ class SecurityService {
 
   static Future<bool> isScreenRecording() async {
     if (!Platform.isIOS) return false;
-
     try {
       final result = await platform.invokeMethod('checkScreenRecording');
       return result == true;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
@@ -1086,9 +1110,8 @@ class SecurityService {
   }
 }
 
-// Enhanced Models
+// ── Models ────────────────────────────────────────────────────────────────────
 
-/// Device Identity - High-level device info
 class DeviceIdentity {
   final String installationId;
   final String deviceName;
@@ -1107,16 +1130,15 @@ class DeviceIdentity {
   });
 
   Map<String, dynamic> toJson() => {
-        'installation_id': installationId,
-        'device_name': deviceName,
-        'device_model': deviceModel,
-        'os_version': osVersion,
-        'app_version': appVersion,
-        'registered_at': registeredAt.toIso8601String(),
-      };
+    'installation_id': installationId,
+    'device_name': deviceName,
+    'device_model': deviceModel,
+    'os_version': osVersion,
+    'app_version': appVersion,
+    'registered_at': registeredAt.toIso8601String(),
+  };
 }
 
-/// Hardware Profile - Comprehensive hardware characteristics
 class HardwareProfile {
   final String deviceId;
   final String brand;
@@ -1127,9 +1149,9 @@ class HardwareProfile {
   final String device;
   final String osVersion;
   final int? sdkInt;
-  final int? screenWidth;  // Made nullable
-  final int? screenHeight; // Made nullable
-  final int? screenDensity; // Made nullable
+  final int? screenWidth;
+  final int? screenHeight;
+  final int? screenDensity;
   final List<String>? supportedAbis;
   final String? board;
   final String? bootloader;
@@ -1161,26 +1183,26 @@ class HardwareProfile {
   });
 
   Map<String, dynamic> toJson() => {
-        'device_id': deviceId,
-        'brand': brand,
-        'manufacturer': manufacturer,
-        'model': model,
-        'hardware': hardware,
-        'product': product,
-        'device': device,
-        'os_version': osVersion,
-        if (sdkInt != null) 'sdk_int': sdkInt,
-        if (screenWidth != null) 'screen_width': screenWidth,
-        if (screenHeight != null) 'screen_height': screenHeight,
-        if (screenDensity != null) 'screen_density': screenDensity,
-        if (supportedAbis != null) 'supported_abis': supportedAbis,
-        if (board != null) 'board': board,
-        if (bootloader != null) 'bootloader': bootloader,
-        if (fingerprint != null) 'fingerprint': fingerprint,
-        if (host != null) 'host': host,
-        'app_version': appVersion,
-        'app_build_number': appBuildNumber,
-      };
+    'device_id': deviceId,
+    'brand': brand,
+    'manufacturer': manufacturer,
+    'model': model,
+    'hardware': hardware,
+    'product': product,
+    'device': device,
+    'os_version': osVersion,
+    if (sdkInt != null) 'sdk_int': sdkInt,
+    if (screenWidth != null) 'screen_width': screenWidth,
+    if (screenHeight != null) 'screen_height': screenHeight,
+    if (screenDensity != null) 'screen_density': screenDensity,
+    if (supportedAbis != null) 'supported_abis': supportedAbis,
+    if (board != null) 'board': board,
+    if (bootloader != null) 'bootloader': bootloader,
+    if (fingerprint != null) 'fingerprint': fingerprint,
+    if (host != null) 'host': host,
+    'app_version': appVersion,
+    'app_build_number': appBuildNumber,
+  };
 
   factory HardwareProfile.fromJson(Map<String, dynamic> json) =>
       HardwareProfile(
@@ -1196,9 +1218,10 @@ class HardwareProfile {
         screenWidth: json['screen_width'],
         screenHeight: json['screen_height'],
         screenDensity: json['screen_density'],
-        supportedAbis: json['supported_abis'] != null
-            ? List<String>.from(json['supported_abis'])
-            : null,
+        supportedAbis:
+            json['supported_abis'] != null
+                ? List<String>.from(json['supported_abis'])
+                : null,
         board: json['board'],
         bootloader: json['bootloader'],
         fingerprint: json['fingerprint'],
@@ -1208,7 +1231,6 @@ class HardwareProfile {
       );
 }
 
-/// Device Consistency Report
 class DeviceConsistencyReport {
   final bool isValid;
   final bool installationIdMatch;
@@ -1243,6 +1265,11 @@ enum ViolationType {
   externalInternet,
   appSwitch,
   screenshot,
+  hooks,
+  devMode,
+  timeSpoofing,
+  locationSpoofing,
+  systemVPN,
 }
 
 enum ViolationSeverity { low, medium, high, critical }
@@ -1263,10 +1290,10 @@ class SecurityViolation {
   });
 
   Map<String, dynamic> toJson() => {
-        'violation_type': type.name,
-        'severity': severity.name,
-        'description': description,
-        'detected_at': detectedAt.toIso8601String(),
-        'metadata': metadata,
-      };
+    'violation_type': type.name,
+    'severity': severity.name,
+    'description': description,
+    'detected_at': detectedAt.toIso8601String(),
+    'metadata': metadata,
+  };
 }

@@ -25,7 +25,7 @@ class ExamServer extends Equatable {
   });
 
   /// Full server URL
-  String get url => 'http://$ipAddress:$port/smashrite/public/api/v1';
+  String get url => 'https://$ipAddress/api/v1';
 
   /// Server display name with IP
   String get displayInfo => '$name ($ipAddress)';

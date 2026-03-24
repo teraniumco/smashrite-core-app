@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 
 class KioskService {
-  static const MethodChannel _channel = MethodChannel('com.smashrite.core/kiosk');
-  
+  static const MethodChannel _channel = MethodChannel(
+    'com.smashrite.core/kiosk',
+  );
+
   static bool _isEnabled = false;
   static bool get isEnabled => _isEnabled;
 
@@ -26,12 +28,12 @@ class KioskService {
         debugPrint('🚨 Home button pressed during exam!');
         // You can trigger a violation here if needed
         return null;
-        
+
       case 'onRecentAppsPressed':
         debugPrint('🚨 Recent apps button pressed during exam!');
         // Trigger violation
         return null;
-        
+
       default:
         throw PlatformException(
           code: 'UNIMPLEMENTED',
@@ -51,27 +53,27 @@ class KioskService {
       if (Platform.isAndroid) {
         final result = await _channel.invokeMethod<bool>('enableKioskMode');
         _isEnabled = result ?? false;
-        
+
         if (_isEnabled) {
           debugPrint('🔒 Android Kiosk mode enabled');
         } else {
           debugPrint('⚠️ Android Kiosk mode failed to enable');
         }
-        
+
         return _isEnabled;
       } else if (Platform.isIOS) {
         final result = await _channel.invokeMethod<bool>('enableKioskMode');
         _isEnabled = result ?? false;
-        
+
         if (_isEnabled) {
           debugPrint('🔒 iOS Guided Access mode info sent');
         } else {
           debugPrint('⚠️ iOS Guided Access info failed');
         }
-        
+
         return _isEnabled;
       }
-      
+
       debugPrint('⚠️ Kiosk mode not supported on this platform');
       return false;
     } catch (e) {
@@ -91,27 +93,27 @@ class KioskService {
       if (Platform.isAndroid) {
         final result = await _channel.invokeMethod<bool>('disableKioskMode');
         _isEnabled = !(result ?? true);
-        
+
         if (!_isEnabled) {
           debugPrint('🔓 Android Kiosk mode disabled');
         } else {
           debugPrint('⚠️ Android Kiosk mode failed to disable');
         }
-        
+
         return !_isEnabled;
       } else if (Platform.isIOS) {
         final result = await _channel.invokeMethod<bool>('disableKioskMode');
         _isEnabled = !(result ?? true);
-        
+
         if (!_isEnabled) {
           debugPrint('🔓 iOS restrictions lifted');
         } else {
           debugPrint('⚠️ iOS restrictions failed to lift');
         }
-        
+
         return !_isEnabled;
       }
-      
+
       return true;
     } catch (e) {
       debugPrint('❌ Failed to disable kiosk mode: $e');

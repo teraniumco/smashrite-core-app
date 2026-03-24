@@ -1,7 +1,9 @@
 import 'dart:convert';
-
+import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:smashrite/core/constants/app_constants.dart';
 import 'package:smashrite/core/storage/storage_service.dart';
 import 'package:smashrite/core/services/security_service.dart';
@@ -10,11 +12,76 @@ import 'package:smashrite/features/server_connection/data/models/exam_server.dar
 class AuthService {
   static Dio? _dio;
 
-  /// Initialize auth service with base URL and token
-  static void initialize(String baseUrl, {String? authToken}) {
+  // ── Shared CA SecurityContext ─────────────────────────────────────────────
+  // Cached after first load — same CA used by SecurityService and
+  // ServerConnectionService. Building it once avoids redundant asset reads.
+  static SecurityContext? _securityContext;
+
+  static Future<SecurityContext> _buildSecurityContext() async {
+    if (_securityContext != null) return _securityContext!;
+
+    try {
+      final caBytes = await rootBundle.load('assets/certs/smashrite_ca.crt');
+      final context = SecurityContext(withTrustedRoots: false);
+      context.setTrustedCertificatesBytes(caBytes.buffer.asUint8List());
+      _securityContext = context;
+      debugPrint(
+        '[AuthService][SSL] Smashrite CA loaded into SecurityContext.',
+      );
+    } catch (e) {
+      debugPrint('[AuthService][SSL] CRITICAL: Failed to load CA cert: $e');
+      rethrow; // Never proceed without a trusted CA
+    }
+
+    return _securityContext!;
+  }
+
+  /// Apply the CA-pinned HttpClient to [dio].
+  /// Must be called right after every Dio(...) constructor.
+  static Future<void> _applySecureAdapter(Dio dio) async {
+    final context = await _buildSecurityContext();
+
+    (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
+      final client = HttpClient(context: context);
+
+      // Reject anything NOT signed by the Smashrite CA
+      client.badCertificateCallback = (
+        X509Certificate cert,
+        String host,
+        int port,
+      ) {
+        debugPrint(
+          '[AuthService][SSL] Rejected cert for unexpected host: $host:$port',
+        );
+        return false;
+      };
+
+      return client;
+    };
+
+    debugPrint('[AuthService][SSL] Secure adapter applied.');
+  }
+
+  /// Enforce HTTPS — upgrade any http:// URL and log a warning
+  static String _enforceHttps(String url) {
+    if (url.startsWith('http://')) {
+      debugPrint('[AuthService][SSL] Warning: upgrading HTTP → HTTPS for $url');
+      return url.replaceFirst('http://', 'https://');
+    }
+    return url;
+  }
+
+  // ── Initialisation ────────────────────────────────────────────────────────
+
+  /// Initialize the auth Dio client.
+  /// Now async so the secure adapter can be applied before any request fires.
+  /// Call with: await AuthService.initialize(server.url)
+  static Future<void> initialize(String baseUrl, {String? authToken}) async {
+    final secureUrl = _enforceHttps(baseUrl);
+
     _dio = Dio(
       BaseOptions(
-        baseUrl: baseUrl,
+        baseUrl: secureUrl,
         connectTimeout: const Duration(seconds: 30),
         receiveTimeout: const Duration(seconds: 30),
         headers: {
@@ -25,30 +92,38 @@ class AuthService {
       ),
     );
 
+    // ── Secure adapter (CA pinning) ───────────────────────────────────────
+    await _applySecureAdapter(_dio!);
+
+    // ── Debug logging ─────────────────────────────────────────────────────
     if (kDebugMode) {
       _dio!.interceptors.add(
         LogInterceptor(
           requestBody: true,
           responseBody: true,
-          logPrint: (obj) => debugPrint(obj.toString()),
+          logPrint: (obj) => debugPrint('[AuthService] $obj'),
         ),
       );
     }
+
+    debugPrint('[AuthService] Initialized with base URL: $secureUrl');
   }
 
   static Dio get dio {
     if (_dio == null) {
       throw Exception(
-        'AuthService not initialized. Call AuthService.initialize() first.',
+        'AuthService not initialized. Call await AuthService.initialize() first.',
       );
     }
     return _dio!;
   }
 
-  /// Update auth token
+  /// Update the Bearer token on the active Dio instance
   static void setAuthToken(String token) {
     dio.options.headers['Authorization'] = 'Bearer $token';
   }
+
+  // ── Auth methods ──────────────────────────────────────────────────────────
 
   /// Login with access code and enhanced device fingerprinting
   static Future<Map<String, dynamic>> login({
@@ -57,56 +132,56 @@ class AuthService {
     required String accessCode,
   }) async {
     try {
-      final serverURL = dio.options.baseUrl;
-
-      final skipCount = StorageService.get<int>(
-        AppConstants.versionSkipCount,
-      ) ?? 0;
-      
+      final skipCount =
+          StorageService.get<int>(AppConstants.versionSkipCount) ?? 0;
       final skipsRemaining = AppConstants.maxVersionSkips - skipCount;
 
-      if(skipsRemaining <= 0){
+      if (skipsRemaining <= 0) {
         return {
           'success': false,
-          'message': "Login failed. You need to update your app version.",
-          'reason': "app_update_required",
+          'message': 'Login failed. You need to update your app version.',
+          'reason': 'app_update_required',
         };
       }
 
-      // Gather device fingerprinting data from SecurityService
+      // Build payload with device fingerprinting
       final deviceData = <String, dynamic>{
         'access_code': accessCode,
         'student_id': studentId,
         'app_update_skips': skipsRemaining,
       };
 
-      // Add enhanced device fingerprinting if available
       if (SecurityService.installationId != null) {
         deviceData['installation_id'] = SecurityService.installationId;
       }
-
       if (SecurityService.compositeFingerprint != null) {
-        deviceData['composite_fingerprint'] = SecurityService.compositeFingerprint;
+        deviceData['composite_fingerprint'] =
+            SecurityService.compositeFingerprint;
       }
-
       if (SecurityService.hardwareProfile != null) {
-        deviceData['hardware_profile'] = SecurityService.hardwareProfile!.toJson();
+        deviceData['hardware_profile'] =
+            SecurityService.hardwareProfile!.toJson();
       }
-
       if (SecurityService.deviceIdentity != null) {
-        deviceData['device_identity'] = SecurityService.deviceIdentity!.toJson();
+        deviceData['device_identity'] =
+            SecurityService.deviceIdentity!.toJson();
       }
 
-      debugPrint('🔐 Login request with device data:');
-      debugPrint('   - Installation ID: ${SecurityService.installationId?.substring(0, 8)}...');
-      debugPrint('   - Composite Fingerprint: ${SecurityService.compositeFingerprint?.substring(0, 16)}...');
-      debugPrint('   - Has Hardware Profile: ${SecurityService.hardwareProfile != null}');
-      debugPrint('   - Has Device Identity: ${SecurityService.deviceIdentity != null}');
-
-      final response = await dio.post(
-        '$serverURL/auth/login',
-        data: deviceData,
+      debugPrint('[AuthService] Login — device fingerprint summary:');
+      debugPrint(
+        '   Installation ID : ${SecurityService.installationId?.substring(0, 8)}...',
       );
+      debugPrint(
+        '   Fingerprint     : ${SecurityService.compositeFingerprint?.substring(0, 16)}...',
+      );
+      debugPrint(
+        '   Hardware profile: ${SecurityService.hardwareProfile != null}',
+      );
+      debugPrint(
+        '   Device identity : ${SecurityService.deviceIdentity != null}',
+      );
+
+      final response = await dio.post('/auth/login', data: deviceData);
 
       if (response.statusCode == 200) {
         final data = response.data as Map<String, dynamic>;
@@ -114,13 +189,11 @@ class AuthService {
         if (data['success'] == true) {
           final responseData = data['data'] as Map<String, dynamic>;
 
-          // Save Access code
           await StorageService.save(
             AppConstants.accessCodeId,
             responseData['access_code_id'].toString(),
           );
 
-          // Save access token
           if (responseData['access_token'] != null) {
             await StorageService.save(
               AppConstants.accessToken,
@@ -128,7 +201,6 @@ class AuthService {
             );
           }
 
-          // Save student data
           if (responseData['student'] != null) {
             final student = responseData['student'] as Map<String, dynamic>;
             await StorageService.save(
@@ -143,29 +215,26 @@ class AuthService {
               AppConstants.studentName,
               student['full_name'].toString(),
             );
-
-            // Save entire student data as JSON
             await StorageService.save(
               AppConstants.studentData,
               jsonEncode(student),
             );
           }
 
-          // Save test/exam data
           if (responseData['test'] != null) {
-            final test = responseData['test'] as Map<String, dynamic>;
             await StorageService.save(
               AppConstants.currentExamData,
-              jsonEncode(test),
+              jsonEncode(responseData['test']),
             );
           }
 
-          // Log device registration status
           final deviceRegistered = responseData['device_registered'] ?? false;
           final deviceId = responseData['device_id'];
-          debugPrint('✅ Device registration status: $deviceRegistered');
+          debugPrint(
+            '[AuthService] Device registration status: $deviceRegistered',
+          );
           if (deviceId != null) {
-            debugPrint('   Device ID: $deviceId');
+            debugPrint('[AuthService] Device ID: $deviceId');
           }
 
           return {
@@ -184,7 +253,6 @@ class AuthService {
           };
         }
       } else if (response.statusCode == 403) {
-        // Device verification failed or other forbidden responses
         final data = response.data as Map<String, dynamic>;
         return {
           'success': false,
@@ -196,13 +264,21 @@ class AuthService {
         };
       } else {
         final data = response.data as Map<String, dynamic>;
-        return {
-          'success': false,
-          'message': data['message'] ?? 'Login failed',
-        };
+        return {'success': false, 'message': data['message'] ?? 'Login failed'};
       }
     } on DioException catch (e) {
-      // Handle 403 Forbidden responses (device verification failures)
+      // Surface SSL errors clearly
+      if (e.error is HandshakeException) {
+        debugPrint(
+          '[AuthService][SSL] HandshakeException on login — cert not trusted by Smashrite CA.',
+        );
+        return {
+          'success': false,
+          'message':
+              'SSL error: Could not verify server certificate. Ensure the server is using a Smashrite-issued cert.',
+        };
+      }
+
       if (e.response?.statusCode == 403) {
         final data = e.response?.data as Map<String, dynamic>?;
         return {
@@ -222,9 +298,7 @@ class AuthService {
   /// Get current user info
   static Future<Map<String, dynamic>> me() async {
     try {
-      final serverURL = dio.options.baseUrl;
-
-      final response = await dio.get('$serverURL/auth/me');
+      final response = await dio.get('/auth/me');
 
       if (response.statusCode == 200 && response.data['success'] == true) {
         return response.data['data'];
@@ -232,6 +306,10 @@ class AuthService {
         throw Exception('Failed to get user info');
       }
     } on DioException catch (e) {
+      if (e.error is HandshakeException) {
+        debugPrint('[AuthService][SSL] HandshakeException on /auth/me');
+        throw Exception('SSL error: Could not verify server certificate.');
+      }
       throw _handleDioError(e);
     }
   }
@@ -239,23 +317,20 @@ class AuthService {
   /// Verify session is still active with device check
   static Future<bool> verifySession() async {
     try {
-      final serverURL = dio.options.baseUrl;
-
       final data = <String, dynamic>{};
-
-      // Add installation_id for device verification
       if (SecurityService.installationId != null) {
         data['installation_id'] = SecurityService.installationId;
       }
 
-      final response = await dio.post(
-        '$serverURL/auth/verify-session',
-        data: data,
-      );
+      final response = await dio.post('/auth/verify-session', data: data);
 
       return response.statusCode == 200 && response.data['success'] == true;
     } on DioException catch (e) {
-      debugPrint('Session verification failed: $e');
+      if (e.error is HandshakeException) {
+        debugPrint('[AuthService][SSL] HandshakeException on verify-session');
+      } else {
+        debugPrint('[AuthService] Session verification failed: $e');
+      }
       return false;
     }
   }
@@ -263,8 +338,6 @@ class AuthService {
   /// Force logout from other devices
   static Future<Map<String, dynamic>> forceLogoutOtherDevices() async {
     try {
-      final serverURL = dio.options.baseUrl;
-
       if (SecurityService.installationId == null) {
         return {
           'success': false,
@@ -273,10 +346,8 @@ class AuthService {
       }
 
       final response = await dio.post(
-        '$serverURL/auth/force-logout-other-devices',
-        data: {
-          'installation_id': SecurityService.installationId,
-        },
+        '/auth/force-logout-other-devices',
+        data: {'installation_id': SecurityService.installationId},
       );
 
       if (response.statusCode == 200) {
@@ -288,27 +359,24 @@ class AuthService {
         };
       }
 
-      return {
-        'success': false,
-        'message': 'Failed to logout other devices',
-      };
+      return {'success': false, 'message': 'Failed to logout other devices'};
     } on DioException catch (e) {
-      debugPrint('Force logout failed: $e');
-      return {
-        'success': false,
-        'message': 'Failed to logout other devices',
-      };
+      if (e.error is HandshakeException) {
+        debugPrint('[AuthService][SSL] HandshakeException on force-logout');
+      } else {
+        debugPrint('[AuthService] Force logout failed: $e');
+      }
+      return {'success': false, 'message': 'Failed to logout other devices'};
     }
   }
 
-  /// Logout - ends session and revokes tokens
+  /// Logout — ends session and revokes tokens
   static Future<Map<String, dynamic>> logout() async {
     try {
       final response = await dio.post('/auth/logout');
 
       if (response.statusCode == 200) {
         final data = response.data as Map<String, dynamic>;
-
         if (data['success'] == true) {
           return {
             'success': true,
@@ -318,29 +386,37 @@ class AuthService {
       }
 
       return {'success': false, 'message': 'Logout failed'};
-    } catch (e) {
+    } on DioException catch (e) {
+      if (e.error is HandshakeException) {
+        debugPrint('[AuthService][SSL] HandshakeException on logout');
+      }
       return {'success': false, 'message': 'Logout failed'};
     }
   }
 
-  /// Handle Dio errors
+  // ── Error handling ────────────────────────────────────────────────────────
+
   static Exception _handleDioError(DioException error) {
+    // Catch SSL failures with a clear message
+    if (error.error is HandshakeException) {
+      return Exception(
+        'SSL error: Could not verify server certificate. '
+        'Ensure the Smashrite CA is installed on this server.',
+      );
+    }
+
     switch (error.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
         return Exception('Connection timeout. Please check your connection.');
-
       case DioExceptionType.badResponse:
         final message = error.response?.data['message'] ?? 'Request failed';
         return Exception(message);
-
       case DioExceptionType.cancel:
         return Exception('Request cancelled');
-
       case DioExceptionType.connectionError:
         return Exception('No connection to server. Check your network.');
-
       default:
         return Exception('An error occurred: ${error.message}');
     }

@@ -26,43 +26,46 @@ class PreFlightCheckService {
   static const double _minStorageMB = 100.0;
   static const int _minBatteryLevel = 40;
   static const int _recommendedBatteryLevel = 70;
-  
+
   /// Run all pre-flight checks
   static Future<PreFlightResult> runAllChecks({
-    required Function(CheckType type, CheckStatus status, String message) onProgress,
+    required Function(CheckType type, CheckStatus status, String message)
+    onProgress,
   }) async {
     debugPrint('🚀 Starting pre-flight checks...');
-    
+
     final checks = <CheckResult>[];
     bool canProceed = true;
-    
+
     // Get all check types sorted by priority
     final checkTypes = List<CheckType>.from(CheckType.values)
       ..sort((a, b) => a.priority.compareTo(b.priority));
-      
+
     // Initialize all checks as pending
     for (var type in checkTypes) {
-      checks.add(CheckResult(
-        type: type,
-        status: CheckStatus.pending,
-        message: 'Waiting...',
-      ));
+      checks.add(
+        CheckResult(
+          type: type,
+          status: CheckStatus.pending,
+          message: 'Waiting...',
+        ),
+      );
     }
-    
+
     // Run checks in priority order
     for (var i = 0; i < checkTypes.length; i++) {
       final type = checkTypes[i];
-      
+
       // Update to checking
       checks[i] = checks[i].copyWith(
         status: CheckStatus.checking,
         message: type.description,
       );
       onProgress(type, CheckStatus.checking, type.description);
-      
+
       // Perform check
       CheckResult result;
-      
+
       try {
         switch (type) {
           case CheckType.deviceSecurity:
@@ -105,10 +108,10 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       checks[i] = result;
       onProgress(type, result.status, result.message);
-      
+
       // Determine if we can proceed
       if (result.status == CheckStatus.failed) {
         // Critical failures stop proceeding
@@ -116,49 +119,49 @@ class PreFlightCheckService {
           canProceed = false;
         }
       }
-      
+
       // Small delay for better UX
       await Future.delayed(const Duration(milliseconds: 300));
     }
-    
+
     debugPrint('✅ Pre-flight checks complete. Can proceed: $canProceed');
-    
+
     return PreFlightResult(
       canProceed: canProceed,
       checks: checks,
       completedAt: DateTime.now(),
     );
   }
-  
+
   /// Check if this is a critical check
   static bool _isCriticalCheck(CheckType type) {
     return type == CheckType.deviceSecurity ||
-           type == CheckType.networkConnectivity ||
-           type == CheckType.systemRequirements ||
-           type == CheckType.storageSpace ||
-           type == CheckType.appVersion ||
-           type == CheckType.permissions;
+        type == CheckType.networkConnectivity ||
+        type == CheckType.systemRequirements ||
+        type == CheckType.storageSpace ||
+        type == CheckType.appVersion ||
+        type == CheckType.permissions;
   }
-  
+
   // ========== INDIVIDUAL CHECKS ==========
-  
+
   /// Check device security using SecurityService
   static Future<CheckResult> _checkDeviceSecurity() async {
     debugPrint('🔒 Checking device security...');
-    
+
     try {
       // Initialize SecurityService if not already done
       if (!SecurityService.isInitialized) {
         await SecurityService.initialize();
       }
-      
+
       // Give FreeRASP a moment to perform checks
       await Future.delayed(const Duration(seconds: 2));
-      
+
       // Check for active violations
       if (SecurityService.hasActiveViolation) {
         final violation = SecurityService.currentViolation;
-        
+
         return CheckResult(
           type: CheckType.deviceSecurity,
           status: CheckStatus.failed,
@@ -167,23 +170,24 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       // Check device consistency (if authenticated)
       final accessToken = StorageService.get<String>(AppConstants.accessToken);
       if (accessToken != null && accessToken.isNotEmpty) {
         final consistency = await SecurityService.checkDeviceConsistency();
-        
+
         if (!consistency.isValid) {
           return CheckResult(
             type: CheckType.deviceSecurity,
             status: CheckStatus.failed,
             message: 'Device fingerprint mismatch detected',
-            details: 'This device may have been tampered with or switched. Contact administrator.',
+            details:
+                'This device may have been tampered with or switched. Contact administrator.',
             checkedAt: DateTime.now(),
           );
         }
       }
-      
+
       return CheckResult(
         type: CheckType.deviceSecurity,
         status: CheckStatus.passed,
@@ -191,7 +195,6 @@ class PreFlightCheckService {
         details: 'No security threats detected',
         checkedAt: DateTime.now(),
       );
-      
     } catch (e) {
       debugPrint('❌ Security check error: $e');
       return CheckResult(
@@ -203,7 +206,7 @@ class PreFlightCheckService {
       );
     }
   }
-  
+
   static String _getSecurityViolationDetails(ViolationType type) {
     switch (type) {
       case ViolationType.rootDetected:
@@ -221,11 +224,11 @@ class PreFlightCheckService {
         return 'Contact support for assistance.';
     }
   }
-  
+
   /// Check network connectivity
   static Future<CheckResult> _checkNetworkConnectivity() async {
     debugPrint('📡 Checking network connectivity...');
-    
+
     try {
       // Check WiFi connection
       final isWiFi = await NetworkService.isConnectedToWiFi();
@@ -250,7 +253,7 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       // Check for external internet (should be disabled)
       final hasInternet = await NetworkService.hasInternetAccessViaSocket();
       if (hasInternet) {
@@ -262,7 +265,7 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       return CheckResult(
         type: CheckType.networkConnectivity,
         status: CheckStatus.passed,
@@ -270,7 +273,6 @@ class PreFlightCheckService {
         details: 'WiFi connected, no external internet',
         checkedAt: DateTime.now(),
       );
-      
     } catch (e) {
       debugPrint('❌ Network check error: $e');
       return CheckResult(
@@ -286,16 +288,16 @@ class PreFlightCheckService {
   /// Check app permissions
   static Future<CheckResult> _checkPermissions() async {
     debugPrint('🔑 Checking permissions...');
-    
+
     try {
       final missingPermissions = <String>[];
-      
+
       // Camera permission (for QR scanning)
       final cameraStatus = await Permission.camera.status;
       if (!cameraStatus.isGranted) {
         missingPermissions.add('Camera (for QR code scanning)');
       }
-      
+
       if (missingPermissions.isNotEmpty) {
         return CheckResult(
           type: CheckType.permissions,
@@ -312,14 +314,13 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       return CheckResult(
         type: CheckType.permissions,
         status: CheckStatus.passed,
         message: 'All permissions granted',
         checkedAt: DateTime.now(),
       );
-      
     } catch (e) {
       debugPrint('❌ Permission check error: $e');
       return CheckResult(
@@ -331,20 +332,20 @@ class PreFlightCheckService {
       );
     }
   }
-  
+
   /// Check system requirements
   static Future<CheckResult> _checkSystemRequirements() async {
     debugPrint('⚙️ Checking system requirements...');
-    
+
     try {
       final deviceInfo = DeviceInfoPlugin();
       final issues = <String>[];
-      
+
       // Check OS version
       if (Platform.isAndroid) {
         final androidInfo = await deviceInfo.androidInfo;
         final sdkInt = androidInfo.version.sdkInt;
-        
+
         if (sdkInt < _minAndroidVersion) {
           issues.add('Android ${androidInfo.version.release} (requires 6.0+)');
         }
@@ -352,12 +353,12 @@ class PreFlightCheckService {
         final iosInfo = await deviceInfo.iosInfo;
         final version = iosInfo.systemVersion;
         final majorVersion = int.tryParse(version.split('.').first) ?? 0;
-        
+
         if (majorVersion < 13) {
           issues.add('iOS $version (requires 13.0+)');
         }
       }
-      
+
       if (issues.isNotEmpty) {
         return CheckResult(
           type: CheckType.systemRequirements,
@@ -367,14 +368,13 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       return CheckResult(
         type: CheckType.systemRequirements,
         status: CheckStatus.passed,
         message: 'Device meets all requirements',
         checkedAt: DateTime.now(),
       );
-      
     } catch (e) {
       debugPrint('❌ System requirements check error: $e');
       return CheckResult(
@@ -385,36 +385,37 @@ class PreFlightCheckService {
       );
     }
   }
-  
+
   /// Check kiosk mode compatibility
   static Future<CheckResult> _checkKioskCompatibility() async {
     debugPrint('🖥️ Checking kiosk mode...');
-    
+
     try {
       final isSupported = await KioskService.isSupported();
-      
+
       if (!isSupported) {
         return CheckResult(
           type: CheckType.kioskCompatibility,
           status: CheckStatus.warning,
           message: 'Limited kiosk support',
-          details: Platform.isIOS 
-              ? 'Enable Guided Access in Settings > Accessibility'
-              : 'Some device lockdown features may not work',
+          details:
+              Platform.isIOS
+                  ? 'Enable Guided Access in Settings > Accessibility'
+                  : 'Some device lockdown features may not work',
           checkedAt: DateTime.now(),
         );
       }
-      
+
       return CheckResult(
         type: CheckType.kioskCompatibility,
         status: CheckStatus.passed,
         message: 'Kiosk mode supported',
-        details: Platform.isIOS 
-            ? 'Guided Access recommended during exam'
-            : 'Full device lockdown available',
+        details:
+            Platform.isIOS
+                ? 'Guided Access recommended during exam'
+                : 'Full device lockdown available',
         checkedAt: DateTime.now(),
       );
-      
     } catch (e) {
       debugPrint('❌ Kiosk check error: $e');
       return CheckResult(
@@ -425,33 +426,33 @@ class PreFlightCheckService {
       );
     }
   }
-  
+
   /// Check for previous session data
   static Future<CheckResult> _checkPreviousSession() async {
     debugPrint('💾 Checking previous session...');
-    
+
     try {
       // Check Hive boxes for pending data
       bool hasPendingData = false;
-      
+
       // Check if answers box exists and has data
       if (Hive.isBoxOpen('answers')) {
         final answersBox = Hive.box('answers');
         hasPendingData = answersBox.isNotEmpty;
       }
-      
+
       // Check if flags box exists and has data
       if (Hive.isBoxOpen('flags')) {
         final flagsBox = Hive.box('flags');
         hasPendingData = hasPendingData || flagsBox.isNotEmpty;
       }
-      
+
       // Check for violation status
       final hasViolationFlag = StorageService.get<bool>(
         AppConstants.examViolationStatus,
         defaultValue: false,
       );
-      
+
       if (hasPendingData) {
         return CheckResult(
           type: CheckType.previousSession,
@@ -461,7 +462,7 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       if (hasViolationFlag == true) {
         return CheckResult(
           type: CheckType.previousSession,
@@ -471,14 +472,13 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       return CheckResult(
         type: CheckType.previousSession,
         status: CheckStatus.passed,
         message: 'No pending session data',
         checkedAt: DateTime.now(),
       );
-      
     } catch (e) {
       debugPrint('❌ Previous session check error: $e');
       return CheckResult(
@@ -489,18 +489,18 @@ class PreFlightCheckService {
       );
     }
   }
-  
+
   /// Check server availability (if connected)
   static Future<CheckResult> _checkServerAvailability() async {
     debugPrint('☁️ Checking server availability...');
-    
+
     try {
       // Check if server is configured
       final hasConnectedToServer = StorageService.get<bool>(
         AppConstants.hasConnectedToServer,
         defaultValue: false,
       );
-      
+
       if (!hasConnectedToServer!) {
         return CheckResult(
           type: CheckType.serverAvailability,
@@ -510,7 +510,7 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       // Server is configured - this is informational only
       // Actual server connection happens later during exam
       return CheckResult(
@@ -519,7 +519,6 @@ class PreFlightCheckService {
         message: 'Server connection will be verified as you continue',
         checkedAt: DateTime.now(),
       );
-      
     } catch (e) {
       debugPrint('❌ Server check error: $e');
       return CheckResult(
@@ -534,11 +533,13 @@ class PreFlightCheckService {
   /// Check storage space using platform channel
   static Future<CheckResult> _checkStorageSpace() async {
     debugPrint('💿 Checking storage space...');
-    
+
     try {
       // Get free disk space from platform channel
-      final freeDiskSpace = await _storageChannel.invokeMethod<double>('getFreeDiskSpace');
-      
+      final freeDiskSpace = await _storageChannel.invokeMethod<double>(
+        'getFreeDiskSpace',
+      );
+
       if (freeDiskSpace == null) {
         return CheckResult(
           type: CheckType.storageSpace,
@@ -548,15 +549,16 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       debugPrint('💾 Free disk space: ${freeDiskSpace.toStringAsFixed(1)} MB');
-      
+
       if (freeDiskSpace < _minStorageMB) {
         return CheckResult(
           type: CheckType.storageSpace,
           status: CheckStatus.failed,
           message: 'Insufficient storage space',
-          details: '${freeDiskSpace.toStringAsFixed(1)} MB available (need ${_minStorageMB.toStringAsFixed(0)} MB)',
+          details:
+              '${freeDiskSpace.toStringAsFixed(1)} MB available (need ${_minStorageMB.toStringAsFixed(0)} MB)',
           action: CheckAction(
             label: 'Free Up Space',
             onTap: () async {
@@ -572,7 +574,7 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       return CheckResult(
         type: CheckType.storageSpace,
         status: CheckStatus.passed,
@@ -580,7 +582,6 @@ class PreFlightCheckService {
         details: '${freeDiskSpace.toStringAsFixed(1)} MB free',
         checkedAt: DateTime.now(),
       );
-      
     } on PlatformException catch (e) {
       debugPrint('❌ Storage check platform error: ${e.message}');
       return CheckResult(
@@ -601,26 +602,27 @@ class PreFlightCheckService {
       );
     }
   }
-  
+
   /// Check battery level
   static Future<CheckResult> _checkBatteryLevel() async {
     debugPrint('🔋 Checking battery level...');
-    
+
     try {
       final battery = Battery();
       final batteryLevel = await battery.batteryLevel;
-      
+
       if (batteryLevel < _minBatteryLevel) {
         return CheckResult(
           type: CheckType.batteryLevel,
           status: CheckStatus.failed,
           message: 'Battery too low',
-          details: '$batteryLevel% (need at least $_minBatteryLevel%). Please charge your device.',
+          details:
+              '$batteryLevel% (need at least $_minBatteryLevel%). Please charge your device.',
           // No action button - just instruction
           checkedAt: DateTime.now(),
         );
       }
-      
+
       if (batteryLevel < _recommendedBatteryLevel) {
         return CheckResult(
           type: CheckType.batteryLevel,
@@ -630,7 +632,7 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       return CheckResult(
         type: CheckType.batteryLevel,
         status: CheckStatus.passed,
@@ -638,7 +640,6 @@ class PreFlightCheckService {
         details: '$batteryLevel%',
         checkedAt: DateTime.now(),
       );
-      
     } catch (e) {
       debugPrint('❌ Battery check error: $e');
       return CheckResult(
@@ -653,16 +654,16 @@ class PreFlightCheckService {
   /// Check app version against server requirements
   static Future<CheckResult> _checkAppVersion() async {
     debugPrint('📱 Checking app version...');
-    
+
     try {
       // Get current app version
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = packageInfo.version;
-      
+
       // Get saved server details
       final connectionService = ServerConnectionService();
       final savedServer = await connectionService.getSavedServer();
-      
+
       // If no server configured yet, skip version check
       if (savedServer == null || savedServer.requiredAppVersion == null) {
         return CheckResult(
@@ -673,30 +674,30 @@ class PreFlightCheckService {
           checkedAt: DateTime.now(),
         );
       }
-      
+
       final requiredVersion = savedServer.requiredAppVersion!;
-      
+
       // Compare versions
       final needsUpdate = VersionUtils.isUpdateRequired(
         currentVersion,
         requiredVersion,
       );
-      
+
       if (needsUpdate) {
         // Check skip count
-        final skipCount = StorageService.get<int>(
-          AppConstants.versionSkipCount,
-        ) ?? 0;
-        
+        final skipCount =
+            StorageService.get<int>(AppConstants.versionSkipCount) ?? 0;
+
         final skipsRemaining = AppConstants.maxVersionSkips - skipCount;
-        
+
         if (skipsRemaining > 0) {
           return CheckResult(
             type: CheckType.appVersion,
             status: CheckStatus.warning,
             message: 'App update available',
-            details: 'Current: v$currentVersion → Required: v$requiredVersion\n'
-                    'You can skip $skipsRemaining more time${skipsRemaining != 1 ? 's' : ''}',
+            details:
+                'Current: v$currentVersion → Required: v$requiredVersion\n'
+                'You can skip $skipsRemaining more time${skipsRemaining != 1 ? 's' : ''}',
             action: CheckAction(
               label: 'Update Now',
               onTap: () async {
@@ -712,8 +713,9 @@ class PreFlightCheckService {
             type: CheckType.appVersion,
             status: CheckStatus.failed,
             message: 'App update required',
-            details: 'Current: v$currentVersion → Required: v$requiredVersion\n'
-                    'Update from Play Store to continue',
+            details:
+                'Current: v$currentVersion → Required: v$requiredVersion\n'
+                'Update from Play Store to continue',
             action: CheckAction(
               label: 'Update from Play Store',
               onTap: () async {
@@ -724,16 +726,16 @@ class PreFlightCheckService {
           );
         }
       }
-      
+
       // Version is up to date
       return CheckResult(
         type: CheckType.appVersion,
         status: CheckStatus.passed,
         message: 'App version up to date',
-        details: 'v$currentVersion (meets server requirement: v$requiredVersion)',
+        details:
+            'v$currentVersion (meets server requirement: v$requiredVersion)',
         checkedAt: DateTime.now(),
       );
-      
     } catch (e) {
       debugPrint('❌ App version check error: $e');
       return CheckResult(
@@ -745,7 +747,6 @@ class PreFlightCheckService {
       );
     }
   }
-
 
   /// Force recheck of app version after user interaction
   static Future<CheckResult> recheckAppVersion() async {
