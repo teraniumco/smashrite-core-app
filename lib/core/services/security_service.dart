@@ -613,11 +613,11 @@ class SecurityService {
         ),
         iosConfig: IOSConfig(
           bundleIds: ['com.smashrite.core'],
-          teamId: 'YOUR_TEAM_ID',
+          teamId: '6N74MV2D96',
         ),
         watcherMail: '',
         isProd: kReleaseMode,
-        killOnBypass: true, // NEW: kills app if attacker suppresses callbacks
+        killOnBypass: true, // kills app if attacker suppresses callbacks
       );
 
       final callback = ThreatCallback(
