@@ -11,6 +11,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:freerasp/freerasp.dart';
 import 'package:package_info_plus/package_info_plus.dart' as package_info;
+import 'package:smashrite/core/utils/smashrite_ssl_context.dart';
 import 'package:uuid/uuid.dart';
 import 'package:smashrite/core/constants/app_constants.dart';
 import 'package:smashrite/core/storage/storage_service.dart';
@@ -88,25 +89,7 @@ class SecurityService {
   /// Apply the Smashrite CA-pinned HttpClient to [dio].
   /// Must be called right after every Dio instance is created.
   static Future<void> _applySecureAdapter(Dio dio) async {
-    final context = await _buildSecurityContext();
-
-    (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
-      final client = HttpClient(context: context);
-
-      // Reject anything that does not match our CA — log and refuse
-      client.badCertificateCallback = (
-        X509Certificate cert,
-        String host,
-        int port,
-      ) {
-        debugPrint('[SSL] Rejected cert for unexpected host: $host:$port');
-        return false;
-      };
-
-      return client;
-    };
-
-    debugPrint('[SSL] Secure adapter applied to Dio instance.');
+    await SmashriteSslContext.applyTo(dio);
   }
 
   /// Force every URL to HTTPS before making a request.
@@ -127,7 +110,7 @@ class SecurityService {
 
     _defaultDio = Dio(
       BaseOptions(
-        baseUrl: _enforceHttps('https://api.smashrite.com/v1'),
+        baseUrl: _enforceHttps('https://localhost/api/v1'),
         connectTimeout: const Duration(seconds: 30),
         receiveTimeout: const Duration(seconds: 30),
         headers: {

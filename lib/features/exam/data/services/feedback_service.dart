@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:smashrite/core/constants/app_constants.dart';
 import 'package:smashrite/core/storage/storage_service.dart';
+import 'package:smashrite/core/utils/smashrite_ssl_context.dart';
 import 'package:smashrite/features/server_connection/data/services/server_connection_service.dart';
 import 'package:package_info_plus/package_info_plus.dart' as package_info;
 
@@ -39,22 +40,7 @@ class FeedbackService {
   }
 
   static Future<void> _applySecureAdapter(Dio dio) async {
-    final context = await _buildSecurityContext();
-
-    (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
-      final client = HttpClient(context: context);
-      client.badCertificateCallback = (
-        X509Certificate cert,
-        String host,
-        int port,
-      ) {
-        debugPrint(
-          '[FeedbackService][SSL] Rejected cert for unexpected host: $host:$port',
-        );
-        return false;
-      };
-      return client;
-    };
+    await SmashriteSslContext.applyTo(dio);
   }
 
   static String _enforceHttps(String url) {

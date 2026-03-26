@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 class NetworkMonitorService {
@@ -20,6 +24,31 @@ class NetworkMonitorService {
   static Timer? _internetCheckTimer;
   static Timer? _serverCheckTimer; // Check server reachability
   static String? _serverUrl; // Store server URL
+
+    // Add this to NetworkMonitorService
+  static SecurityContext? _securityContext;
+  static Dio? _pinnedDio;
+
+  static Future<Dio> _getPinnedDio() async {
+    if (_pinnedDio != null) return _pinnedDio!;
+
+    final caBytes = await rootBundle.load('assets/certs/smashrite_ca.crt');
+    final context = SecurityContext(withTrustedRoots: false);
+    context.setTrustedCertificatesBytes(caBytes.buffer.asUint8List());
+
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 5),
+      receiveTimeout: const Duration(seconds: 5),
+    ));
+
+    (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
+      return HttpClient(context: context)
+        ..badCertificateCallback = (_, __, ___) => false;
+    };
+
+    _pinnedDio = dio;
+    return _pinnedDio!;
+  }
 
   /// Initialize network monitoring with server URL
   static Future<void> initialize({String? serverUrl}) async {
@@ -137,37 +166,30 @@ class NetworkMonitorService {
     }
   }
 
+
   /// Ping the exam server using an existing endpoint
-  static Future<bool> _pingServer() async {
+   static Future<bool> _pingServer() async {
     if (_serverUrl == null) return false;
-
+      final dio = await _getPinnedDio();
     try {
-      // Use a lightweight existing endpoint instead of /health
-      // Option 1: Try the base URL
-      final response = await http
-          .head(Uri.parse(_serverUrl!))
-          .timeout(const Duration(seconds: 5));
-
-      // Any response (even 404) means server is reachable
-      return response.statusCode < 500;
+      final response = await dio.head(_serverUrl!);
+      return response.statusCode != null && response.statusCode! < 500;
     } catch (e) {
       // Try alternative: Use the /exam/progress endpoint (GET request)
       try {
-        final altResponse = await http
-            .get(
-              Uri.parse('$_serverUrl/exam/progress'),
-              headers: {'Accept': 'application/json'},
-            )
+        final altResponse = await dio
+            .get(' $_serverUrl/exam/progress')
             .timeout(const Duration(seconds: 5));
 
         // Server is reachable if we get any response
-        return altResponse.statusCode < 500;
+        return altResponse.statusCode != null && altResponse.statusCode! < 500;
       } catch (altError) {
         debugPrint('[!! WARNING !!] Server unreachable: $altError');
         return false;
       }
     }
   }
+
 
   /// Update server connection state and trigger callbacks
   static void _updateServerConnectionState(bool isConnected) {

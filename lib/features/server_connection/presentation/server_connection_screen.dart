@@ -36,28 +36,23 @@ class _ServerConnectionScreenState extends State<ServerConnectionScreen> {
     }
   }
 
-  void _navigateToMethod(String route) {
+  void _onScanTap() {
     if (_isCheckingNetwork) return;
-    
+
     if (_networkError != null) {
       _showNetworkErrorDialog();
       return;
     }
-    context.push(route);
+
+    context.push('/server-connection/qr-scanner');
   }
 
   void _showNetworkErrorDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Network Error'),
-        content: Text(
-          _networkError ?? 'Network validation failed',
-          style: TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 17 
-            ),
-          ),
+      builder: (_) => AlertDialog(
+        title: const Text('Network Issue'),
+        content: Text(_networkError ?? 'Validation failed'),
         actions: [
           TextButton(
             onPressed: () {
@@ -65,7 +60,7 @@ class _ServerConnectionScreenState extends State<ServerConnectionScreen> {
               _validateNetwork();
             },
             child: const Text('Retry'),
-          ),
+          )
         ],
       ),
     );
@@ -75,232 +70,165 @@ class _ServerConnectionScreenState extends State<ServerConnectionScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+
+      // 🔥 Full-width CTA anchored at bottom
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.all(16),
+        child: _PrimaryPillButton(
+          label: 'Scan QR Code',
+          onTap: _onScanTap,
+          disabled: _isCheckingNetwork,
+          fullWidth: true, // 👈 NEW
+        ),
+      ),
+
       body: SafeArea(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+           
+            // 🔥 FULL-WIDTH SECTION
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 45, 24, 0),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(20, 32, 20, 24),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Title
                     Text(
-                      'Connect to Server',
+                      'Connect to Exam Server',
                       style: Theme.of(context).textTheme.displaySmall?.copyWith(
                             fontWeight: FontWeight.bold,
-                            fontSize: 28,
+                            fontSize: 25,
                           ),
                     ),
-                    const SizedBox(height: 8),
 
-                    // Subtitle
-                    Text(
-                      'Choose how you want to connect to the exam network.',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: AppColors.textPrimary,
-                            fontSize: 18
-                          ),
-                    ),
+                    const Spacer(),
+
+
+                    // QR VISUAL
+                    const _QRPreview(),
+
                     const SizedBox(height: 32),
 
-                    // Network Status Banner
-                    if (_isCheckingNetwork)
-                      _buildStatusBanner(
-                        icon: Icons.wifi_find,
-                        text: 'Checking network...',
-                        color: AppColors.info,
-                      )
-                    else if (_networkError != null)
-                      _buildStatusBanner(
-                        icon: Icons.warning_rounded,
-                        text: _networkError!,
-                        color: AppColors.error,
-                        action: TextButton(
-                          onPressed: _validateNetwork,
-                          child: const Text('Retry'),
-                        ),
-                      )
-                    else
-                      _buildStatusBanner(
-                        icon: Icons.check_circle_rounded,
-                        text: 'No Internet and device is ready!',
-                        color: AppColors.success,
-                      ),
+                    // STATUS
+                    _buildStatus(),
 
-                    const SizedBox(height: 24),
-
-                    // Connection Methods
-                    
-
-                    _ConnectionMethodCard(
-                      icon: Icons.wifi_find_rounded,
-                      title: 'Auto-Discover',
-                      description: 'Search for exam servers on the local network',
-                      isRecommended: true,
-                      onTap: () => _navigateToMethod('/server-connection/auto-discover'),
-                    ),
-                    const SizedBox(height: 16),
-
-                    _ConnectionMethodCard(
-                      icon: Icons.qr_code_scanner_rounded,
-                      title: 'Scan QR Code',
-                      description: 'Scan the QR code provided by the Digital Exam administrator',
-                      onTap: () => _navigateToMethod('/server-connection/qr-scanner'),
-                    ),
-                    const SizedBox(height: 16),
-
-                    _ConnectionMethodCard(
-                      icon: Icons.keyboard_outlined,
-                      title: 'Manual Entry',
-                      description: 'Enter exam server connection details',
-                      onTap: () => _navigateToMethod('/server-connection/manual-entry'),
-                    ),
+                    const Spacer(),
                   ],
                 ),
               ),
             ),
-
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStatusBanner({
-    required IconData icon,
-    required String text,
-    required Color color,
-    Widget? action,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 24),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          if (action != null) action,
-        ],
+
+
+
+  Widget _buildStatus() {
+    if (_isCheckingNetwork) {
+      return const CircularProgressIndicator();
+    }
+
+    final isError = _networkError != null;
+
+    return Text(
+      isError ? 'Network not ready' : 'Ready to scan',
+      style: TextStyle(
+        color: isError ? AppColors.error : AppColors.success,
+        fontWeight: FontWeight.w600,
       ),
     );
   }
 }
 
-class _ConnectionMethodCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String description;
-  final bool isRecommended;
-  final VoidCallback onTap;
+  class _QRPreview extends StatelessWidget {
+    const _QRPreview();
 
-  const _ConnectionMethodCard({
-    required this.icon,
-    required this.title,
-    required this.description,
-    this.isRecommended = false,
+    @override
+    Widget build(BuildContext context) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: const Color.fromARGB(255, 105, 108, 112)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.qr_code_2_rounded,
+              size: 200, // slightly bigger = more premium
+              color: AppColors.primary,
+            ),
+            const SizedBox(height: 20),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                'Scan the QR code on your exam access slip provided by your exam administrator',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      height: 1.5,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textSecondary,
+                    ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+class _PrimaryPillButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  final bool disabled;
+  final bool fullWidth;
+
+  const _PrimaryPillButton({
+    required this.label,
     required this.onTap,
+    required this.disabled,
+    this.fullWidth = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          children: [
-            // Icon
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: AppColors.primaryLight,
-                shape: BoxShape.circle,
+    return GestureDetector(
+      onTap: disabled ? null : onTap,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        opacity: disabled ? 0.5 : 1,
+        child: Container(
+          width: fullWidth ? double.infinity : null,
+          padding: const EdgeInsets.symmetric(
+            vertical: 16,
+          ),
+          decoration: BoxDecoration(
+            color: AppColors.primary,
+            borderRadius: BorderRadius.circular(16), 
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize:
+                fullWidth ? MainAxisSize.max : MainAxisSize.min,
+            children: [
+              const Icon(Icons.qr_code_scanner, color: Colors.white),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              child: Icon(
-                icon,
-                color: AppColors.primary,
-                size: 28,
-              ),
-            ),
-            const SizedBox(width: 16),
-
-            // Content
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        title,
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                              fontSize: 17,
-                            ),
-                      ),
-                      if (isRecommended) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.success.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            'Recommended',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.success,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    description,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.textPrimary,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(width: 8),
-
-            // Arrow
-            Icon(
-              Icons.arrow_forward_ios_rounded,
-              size: 16,
-              color: AppColors.textTertiary,
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

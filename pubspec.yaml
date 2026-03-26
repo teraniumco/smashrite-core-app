@@ -123,7 +123,7 @@ flutter:
     - assets/icons/
     - assets/sounds/
     - assets/fonts/
-    - assets/certs/smashrite_ca.crt
+    - assets/certs/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

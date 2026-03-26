@@ -7,24 +7,16 @@ import 'package:flutter/services.dart';
 import 'package:smashrite/core/constants/app_constants.dart';
 import 'package:smashrite/core/network/udp_discovery_service.dart';
 import 'package:smashrite/core/storage/storage_service.dart';
+import 'package:smashrite/core/utils/smashrite_ssl_context.dart';
 import '../models/exam_server.dart';
 import 'package:package_info_plus/package_info_plus.dart' as package_info;
 
-class ServerConnectionService {
-  late Dio _dio;
-  static SecurityContext? _securityContext;
-
-  ServerConnectionService() {
-    _dio = Dio(); // will be replaced after _init()
-    _init();
-  }
-
-  /// Load CA cert and build a trusted Dio instance
-  Future<void> _init() async {
-    _dio = Dio(
+class SecureDioFactory {
+  static Future<Dio> create() async {
+    final dio = Dio(
       BaseOptions(
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 15),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -32,59 +24,36 @@ class ServerConnectionService {
       ),
     );
 
-    await _applySecureAdapter(_dio);
+    await SmashriteSslContext.applyTo(dio);
+
+    return dio;
+  }
+}
+
+class ServerConnectionService {
+  late Dio _dio;
+  late Future<void> _initFuture;
+
+  ServerConnectionService() {
+    _initFuture = _init();
   }
 
-  /// Build a SecurityContext that trusts ONLY the Smashrite CA
-  static Future<SecurityContext> _buildSecurityContext() async {
-    if (_securityContext != null) return _securityContext!;
-
-    // Load CA cert bundled in the app
-    final caBytes = await rootBundle.load('assets/certs/smashrite_ca.crt');
-
-    final context = SecurityContext(withTrustedRoots: false);
-    context.setTrustedCertificatesBytes(caBytes.buffer.asUint8List());
-
-    _securityContext = context;
-    return context;
-  }
-
-  /// Apply the secure HTTP adapter to a Dio instance
-  static Future<void> _applySecureAdapter(Dio dio) async {
-    try {
-      final context = await _buildSecurityContext();
-
-      (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
-        final client = HttpClient(context: context);
-
-        // Only allow connections to smashrite.local or local IPs
-        client.badCertificateCallback = (
-          X509Certificate cert,
-          String host,
-          int port,
-        ) {
-          // Extra safety — log and reject anything unexpected
-          debugPrint('[SSL] Rejected cert for unexpected host: $host');
-          return false;
-        };
-
-        return client;
-      };
-    } catch (e) {
-      debugPrint('[SSL] Failed to load CA cert: $e');
-      // Do NOT fall back to insecure — fail loudly
-      rethrow;
+  Future<void> _init() async {
+    _dio = await SecureDioFactory.create();
+    if (kDebugMode) {
+      _dio.interceptors.add(LogInterceptor(
+        request: true,
+        requestBody: true,
+        responseBody: true,
+        error: true,
+      ));
     }
   }
+  
 
   /// Ensure server URL is always HTTPS
   String _secureUrl(ExamServer server) {
-    final url = server.url;
-    if (url.startsWith('http://')) {
-      debugPrint('[SSL] Warning: server URL was HTTP — upgrading to HTTPS');
-      return url.replaceFirst('http://', 'https://');
-    }
-    return url;
+    return server.url.trim(); // assume already correct
   }
 
   Future<String?> _getApiKey() async {
@@ -94,7 +63,7 @@ class ServerConnectionService {
   /// Test connection to exam server with auth code
   Future<Map<String, dynamic>> testConnection(ExamServer server) async {
     // Ensure Dio is initialised with secure adapter
-    await _init();
+    await _initFuture;
 
     try {
       final apiKey = await _getApiKey();
@@ -119,6 +88,7 @@ class ServerConnectionService {
         ),
       );
 
+     
       if (response.statusCode == 200) {
         final data = response.data as Map<String, dynamic>;
 

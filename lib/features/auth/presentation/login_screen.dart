@@ -1,14 +1,101 @@
+import 'dart:typed_data';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:smashrite/core/network/network_service.dart';
 import 'package:smashrite/core/services/security_service.dart';
 import 'package:smashrite/core/theme/app_theme.dart';
+import 'package:smashrite/core/utils/smashrite_ssl_context.dart';
 import 'package:smashrite/features/auth/data/services/auth_service.dart';
 import 'package:smashrite/features/auth/presentation/widgets/server_info_modal.dart';
 import 'package:smashrite/features/server_connection/data/models/exam_server.dart';
 import 'package:smashrite/features/server_connection/data/services/server_connection_service.dart';
 import 'package:smashrite/shared/utils/snackbar_helper.dart';
+
+class SecureNetworkImage extends StatefulWidget {
+  final String url;
+  final double? height;
+  final BoxFit fit;
+  final Widget Function(BuildContext, Object, StackTrace?) errorBuilder;
+  final Widget Function(BuildContext, Widget, ImageChunkEvent?)? loadingBuilder;
+
+  const SecureNetworkImage({
+    super.key,
+    required this.url,
+    this.height,
+    this.fit = BoxFit.contain,
+    required this.errorBuilder,
+    this.loadingBuilder,
+  });
+
+  @override
+  State<SecureNetworkImage> createState() => _SecureNetworkImageState();
+}
+
+class _SecureNetworkImageState extends State<SecureNetworkImage> {
+  late Future<Uint8List> _imageFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _imageFuture = _fetchImage();
+  }
+
+  Future<Uint8List> _fetchImage() async {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 10),
+        responseType: ResponseType.bytes,
+      ),
+    );
+
+    await SmashriteSslContext.applyTo(dio); // ← one line replaces everything
+
+
+    final response = await dio.get<List<int>>(widget.url);
+    return Uint8List.fromList(response.data!);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Uint8List>(
+      future: _imageFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return SizedBox(
+            height: widget.height ?? 50,
+            child: Center(
+              child: SizedBox(
+                width: 30,
+                height: 30,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    Colors.blue.withOpacity(0.6),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        if (snapshot.hasError || !snapshot.hasData) {
+          return widget.errorBuilder(context, snapshot.error ?? 'Failed', null);
+        }
+
+        return Image.memory(
+          snapshot.data!,
+          height: widget.height,
+          fit: widget.fit,
+        );
+      },
+    );
+  }
+}
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -908,39 +995,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Build institution logo with loading and error states
   Widget _buildInstitutionLogo() {
-    return Image.network(
-      _currentServer!.institutionLogoUrl!,
+    return SecureNetworkImage(    
+      url: _currentServer!.institutionLogoUrl!,
       height: 50,
       fit: BoxFit.contain,
-      loadingBuilder: (context, child, loadingProgress) {
-        if (loadingProgress == null) {
-          return child;
-        }
-
-        // Show loading indicator while image loads
-        return SizedBox(
-          height: 80,
-          child: Center(
-            child: SizedBox(
-              width: 30,
-              height: 30,
-              child: CircularProgressIndicator(
-                value:
-                    loadingProgress.expectedTotalBytes != null
-                        ? loadingProgress.cumulativeBytesLoaded /
-                            loadingProgress.expectedTotalBytes!
-                        : null,
-                strokeWidth: 2.5,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  AppColors.primary.withOpacity(0.6),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
       errorBuilder: (context, error, stackTrace) {
-        // Show institution name or fallback icon on error
         return SizedBox(
           height: 80,
           child: Column(
@@ -971,6 +1030,7 @@ class _LoginScreenState extends State<LoginScreen> {
       },
     );
   }
+
 
   Widget _buildStatusBanner({
     required IconData icon,
@@ -1030,3 +1090,6 @@ class _AccessCodeFormatter extends TextInputFormatter {
     );
   }
 }
+
+
+

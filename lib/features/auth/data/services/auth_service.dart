@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:smashrite/core/constants/app_constants.dart';
 import 'package:smashrite/core/storage/storage_service.dart';
 import 'package:smashrite/core/services/security_service.dart';
+import 'package:smashrite/core/utils/smashrite_ssl_context.dart';
 import 'package:smashrite/features/server_connection/data/models/exam_server.dart';
 
 class AuthService {
@@ -39,27 +40,7 @@ class AuthService {
   /// Apply the CA-pinned HttpClient to [dio].
   /// Must be called right after every Dio(...) constructor.
   static Future<void> _applySecureAdapter(Dio dio) async {
-    final context = await _buildSecurityContext();
-
-    (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
-      final client = HttpClient(context: context);
-
-      // Reject anything NOT signed by the Smashrite CA
-      client.badCertificateCallback = (
-        X509Certificate cert,
-        String host,
-        int port,
-      ) {
-        debugPrint(
-          '[AuthService][SSL] Rejected cert for unexpected host: $host:$port',
-        );
-        return false;
-      };
-
-      return client;
-    };
-
-    debugPrint('[AuthService][SSL] Secure adapter applied.');
+    await SmashriteSslContext.applyTo(dio);
   }
 
   /// Enforce HTTPS — upgrade any http:// URL and log a warning
