@@ -66,26 +66,6 @@ class SecurityService {
 
   // ── Secure Dio builder ────────────────────────────────────────────────────
 
-  /// Load the Smashrite CA from bundled assets and build a SecurityContext
-  /// that trusts ONLY that CA (withTrustedRoots: false).
-  /// Called once; result is cached in [_securityContext].
-  static Future<SecurityContext> _buildSecurityContext() async {
-    if (_securityContext != null) return _securityContext!;
-
-    try {
-      final caBytes = await rootBundle.load('assets/certs/smashrite_ca.crt');
-      final context = SecurityContext(withTrustedRoots: false);
-      context.setTrustedCertificatesBytes(caBytes.buffer.asUint8List());
-      _securityContext = context;
-      debugPrint('[SSL] SecurityContext built — Smashrite CA loaded.');
-    } catch (e) {
-      debugPrint('[SSL] CRITICAL: Failed to load CA cert: $e');
-      rethrow; // Do NOT continue without a trusted CA
-    }
-
-    return _securityContext!;
-  }
-
   /// Apply the Smashrite CA-pinned HttpClient to [dio].
   /// Must be called right after every Dio instance is created.
   static Future<void> _applySecureAdapter(Dio dio) async {

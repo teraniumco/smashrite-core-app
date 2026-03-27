@@ -5,7 +5,6 @@ import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:smashrite/core/constants/app_constants.dart';
-import 'package:smashrite/core/network/udp_discovery_service.dart';
 import 'package:smashrite/core/storage/storage_service.dart';
 import 'package:smashrite/core/utils/smashrite_ssl_context.dart';
 import '../models/exam_server.dart';
@@ -15,8 +14,8 @@ class SecureDioFactory {
   static Future<Dio> create() async {
     final dio = Dio(
       BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 15),
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 10),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -193,34 +192,6 @@ class ServerConnectionService {
     } catch (e) {
       debugPrint('Error clearing server details: $e');
       rethrow;
-    }
-  }
-
-  Future<List<ExamServer>> discoverServers() async {
-    try {
-      debugPrint('Starting server discovery...');
-      final discoveryService = UdpDiscoveryService();
-      final discoveredServers = await discoveryService.discoverServers();
-      debugPrint('Found ${discoveredServers.length} server(s)');
-
-      final examServers =
-          discoveredServers.map((server) {
-            return ExamServer(
-              name: server.serverName,
-              ipAddress: server.serverIp,
-              port: server.port,
-              signalStrength: _calculateSignalStrength(server.timestamp),
-            );
-          }).toList();
-
-      examServers.sort(
-        (a, b) => (b.signalStrength ?? 0).compareTo(a.signalStrength ?? 0),
-      );
-
-      return examServers;
-    } catch (e) {
-      debugPrint('Discovery error: $e');
-      return [];
     }
   }
 

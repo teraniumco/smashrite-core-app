@@ -71,14 +71,13 @@ class _ServerConnectionScreenState extends State<ServerConnectionScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
 
-      // 🔥 Full-width CTA anchored at bottom
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.all(16),
         child: _PrimaryPillButton(
           label: 'Scan QR Code',
           onTap: _onScanTap,
           disabled: _isCheckingNetwork,
-          fullWidth: true, // 👈 NEW
+          fullWidth: true,
         ),
       ),
 
@@ -135,10 +134,11 @@ class _ServerConnectionScreenState extends State<ServerConnectionScreen> {
     final isError = _networkError != null;
 
     return Text(
-      isError ? 'Network not ready' : 'Ready to scan',
+      isError ? 'Device not ready' : 'Ready to scan',
       style: TextStyle(
         color: isError ? AppColors.error : AppColors.success,
         fontWeight: FontWeight.w600,
+        fontSize: 20,
       ),
     );
   }
@@ -214,21 +214,28 @@ class _PrimaryPillButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(16), 
           ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize:
-                fullWidth ? MainAxisSize.max : MainAxisSize.min,
-            children: [
-              const Icon(Icons.qr_code_scanner, color: Colors.white),
-              const SizedBox(width: 10),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize:
+                    fullWidth ? MainAxisSize.max : MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  const Icon(
+                    Icons.qr_code_scanner,
+                    color: Colors.white,
+                    size: 20, // match text size
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 20,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
         ),
       ),
     );
