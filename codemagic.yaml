@@ -92,8 +92,6 @@ workflows:
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
             --key-id "$APP_STORE_CONNECT_KEY_ID" \
             --private-key "$(cat AuthKey.p8)" \
-            --certificate-key "$(cat cert_key.pem)" \
-            --p12-password "$IOS_P12_PASSWORD"
           echo "📁 After fetch:"
           ls -la "$HOME/Library/MobileDevice/Certificates" || true
           ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
