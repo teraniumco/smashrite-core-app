@@ -16,6 +16,7 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: $BUNDLE_ID
+        team_id: "6N74MV2D96"
 
     scripts:
       - name: Set iOS bundle identifier dynamically
