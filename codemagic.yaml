@@ -1,6 +1,6 @@
 workflows:
   ios-release:
-    name: Smashrite – iOS (Auto-sign + TestFlight)
+    name: Smashrite Core – iOS (Auto-sign + TestFlight)
     max_build_duration: 60
     environment:
       flutter: stable
@@ -9,12 +9,35 @@ workflows:
       groups:
         - smashrite-vars   # ensure this group exists and contains the vars below
       vars:
-        BUNDLE_ID: "com.smashrite.core"
+        BUNDLE_ID: "com.smashrite.core.ios"
         APPLE_TEAM_ID: "6N74MV2D96"  # your Apple Developer Team ID
         COCOAPODS_DISABLE_STATS: "true"
     scripts:
       - name: Flutter deps
         script: flutter pub get
+
+      - name: Replace Bundle ID everywhere only for iOS
+        script: |
+          set -e
+
+          OLD_ID="com.smashrite.core"
+          NEW_ID="com.smashrite.core.ios"
+
+          echo "🔁 Replacing $OLD_ID → $NEW_ID"
+
+          # 1. Runner project (main place)
+          sed -i '' "s/$OLD_ID/$NEW_ID/g" ios/Runner.xcodeproj/project.pbxproj || true
+          sed -i    "s/$OLD_ID/$NEW_ID/g" ios/Runner.xcodeproj/project.pbxproj || true
+
+          # 2. Info.plist (rare but safe)
+          sed -i '' "s/$OLD_ID/$NEW_ID/g" ios/Runner/Info.plist || true
+          sed -i    "s/$OLD_ID/$NEW_ID/g" ios/Runner/Info.plist || true
+
+          # 3. ExportOptions or configs (if present)
+          grep -rl "$OLD_ID" ios | xargs sed -i '' "s/$OLD_ID/$NEW_ID/g" || true
+          grep -rl "$OLD_ID" ios | xargs sed -i    "s/$OLD_ID/$NEW_ID/g" || true
+
+          echo "✅ Bundle ID replaced"
 
       - name: Initialize keychain
         script: keychain initialize
@@ -170,7 +193,6 @@ workflows:
                 print "    target.build_configurations.each do |config|"
                 print "      defs = config.build_settings[\"GCC_PREPROCESSOR_DEFINITIONS\"] || [\"$(inherited)\"]"
                 print "      defs |= ["
-                print "        \"PERMISSION_LOCATION=1\","
                 print "        \"PERMISSION_NOTIFICATIONS=1\""
                 # print "        \"PERMISSION_PHOTOS=1\","
                 # print "        \"PERMISSION_CAMERA=1\""
@@ -193,7 +215,6 @@ workflows:
               target.build_configurations.each do |config|
                 defs = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
                 defs |= [
-                  'PERMISSION_LOCATION=1',
                   'PERMISSION_NOTIFICATIONS=1'
                   # 'PERMISSION_PHOTOS=1',
                   # 'PERMISSION_CAMERA=1'
@@ -227,32 +248,6 @@ workflows:
           else
             echo "ℹ️ Stats already disabled"
           fi
-
-      - name: Set Google Maps iOS API key from .env into Info.plist
-        script: |
-          set -euo pipefail
-          PLIST="ios/Runner/Info.plist"
-
-          # Pick a value from .env (prefer GOOGLE_API_KEY, else GOOGLE_API_KEY)
-          if [ -f ".env" ]; then
-            IOS_MAPS_KEY=$(grep -E '^(GOOGLE_API_KEY)=' .env | head -n1 | cut -d= -f2-)
-          fi
-
-          # Fallback to Codemagic env var if you prefer to store secrets in the UI
-          IOS_MAPS_KEY="${IOS_MAPS_KEY:-${GOOGLE_API_KEY:-}}"
-
-          if [ -z "${IOS_MAPS_KEY:-}" ]; then
-            echo "❌ No iOS Maps API key found (GOOGLE_API_KEY / GOOGLE_API_KEY)."
-            exit 1
-          fi
-
-          # Write/overwrite GMSApiKey in Info.plist
-          /usr/libexec/PlistBuddy -c "Delete :GMSApiKey" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :GMSApiKey string $IOS_MAPS_KEY" "$PLIST"
-
-          echo "✅ Wrote GMSApiKey to $PLIST"
-
-
 
       - name: Pod install via CDN (retry, no `pod repo update`)
         script: |
@@ -326,41 +321,35 @@ workflows:
           set -e
           PLIST="ios/Runner/Info.plist"
           add_str() { /usr/libexec/PlistBuddy -c "Add :$1 string $2" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :$1 $2" "$PLIST" 2>/dev/null || true; }
-          add_bool() { /usr/libexec/PlistBuddy -c "Add :$1 $2" "$PLIST" 2>/dev/null || true; }
 
-          add_str NSLocationWhenInUseUsageDescription "We use your location to show nearby drivers, pickups, and estimate arrival times."
-          add_str NSLocationAlwaysAndWhenInUseUsageDescription "We use your location to enable accurate tracking and notifications even when the app is not active."
-          add_str NSCameraUsageDescription "Allow camera to take photos of rides and documents."
-          add_str NSMicrophoneUsageDescription "Allow microphone for video recording."
-          add_str NSPhotoLibraryUsageDescription "Allow photo library access to choose images."
-          add_str NSPhotoLibraryAddUsageDescription "Allow saving images to your library."
-          
+          # Camera — for scanning student ID cards or answer sheets
+          add_str NSCameraUsageDescription "Allow camera access to scan documents and capture photos for exam processes."
+
+          # Notifications — for exam start/end alerts and admin broadcasts
+          add_str NSUserNotificationsUsageDescription "Allow notifications to receive exam alerts and important announcements."
+
+          # Local network — critical for LAN-based exam delivery (offline-first)
+          add_str NSLocalNetworkUsageDescription "Smashrite uses your local network to connect to the exam server for offline-mode assessments."
+          add_str NSBonjourServices "_smashrite._tcp"
+
           /usr/libexec/PlistBuddy -c "Print" "$PLIST" | sed -n '1,120p'
 
 
-      - name: Create .env for release
-        script: |
-          set -e
+      # - name: Create .env for release
+      #   script: |
+      #     set -e
 
-          # 1) Make sure required secrets exist
-          req() { [ -n "$2" ] || { echo "❌ $1 is missing"; exit 1; }; echo "✅ $1 present"; }
-          req GOOGLE_API_KEY "$GOOGLE_API_KEY"
-          req X_WF_SECURITY_KEY "$X_WF_SECURITY_KEY"
-          req NUBAN_BEARER_TOKEN "$NUBAN_BEARER_TOKEN"
-          req WEB_SOCKET_KEY "$WEB_SOCKET_KEY"
-          req X_ESSE_MEDIA_SECURITY_KEY "$X_ESSE_MEDIA_SECURITY_KEY"
+      #     # 1) Make sure required secrets exist
+      #     req() { [ -n "$2" ] || { echo "❌ $1 is missing"; exit 1; }; echo "✅ $1 present"; }
+      #     req X_API_KEY "$X_API_KEY"
 
-          # 2) Write .env with EXPANDED values (note: unquoted EOF)
-          cat > .env <<EOF
-          GOOGLE_API_KEY=${GOOGLE_API_KEY}
-          X_WF_SECURITY_KEY=${X_WF_SECURITY_KEY}
-          NUBAN_BEARER_TOKEN=${NUBAN_BEARER_TOKEN}
-          WEB_SOCKET_KEY=${WEB_SOCKET_KEY}
-          X_ESSE_MEDIA_SECURITY_KEY=${X_ESSE_MEDIA_SECURITY_KEY}
-          EOF
+      #     # 2) Write .env with EXPANDED values (note: unquoted EOF)
+      #     cat > .env <<EOF
+      #     X_API_KEY=${X_API_KEY}
+      #     EOF
 
-          echo "✅ Wrote $(pwd)/.env"
-          echo "🔎 Keys present:"; cut -d= -f1 .env
+      #     echo "✅ Wrote $(pwd)/.env"
+      #     echo "🔎 Keys present:"; cut -d= -f1 .env
 
 
       - name: Regenerate iOS app icons (no alpha)
