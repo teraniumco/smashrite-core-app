@@ -290,17 +290,17 @@ import Flutter
         // 1. Disable idle timer (keep screen on)
         UIApplication.shared.isIdleTimerDisabled = true
         
-        // 2. Hide status bar
-        if #available(iOS 13.0, *) {
-            // For iOS 13+, status bar hiding is controlled by view controller
-            // We'll set a flag and the view controller should handle it
-            DispatchQueue.main.async {
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                    windowScene.statusBarManager?.statusBarFrame = .zero
-                }
-            }
-        }
-        UIApplication.shared.setStatusBarHidden(true, with: .fade)
+        // // 2. Hide status bar
+        // if #available(iOS 13.0, *) {
+        //     // For iOS 13+, status bar hiding is controlled by view controller
+        //     // We'll set a flag and the view controller should handle it
+        //     DispatchQueue.main.async {
+        //         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+        //             windowScene.statusBarManager?.statusBarFrame = .zero
+        //         }
+        //     }
+        // }
+        // UIApplication.shared.setStatusBarHidden(true, with: .fade)
         
         // 3. Set full screen
         if let window = self.window {
