@@ -91,7 +91,7 @@ workflows:
             --create \
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
             --key-id "$APP_STORE_CONNECT_KEY_ID" \
-            --private-key "$(cat AuthKey.p8)" \
+            --private-key "$(cat AuthKey.p8)"
           echo "📁 After fetch:"
           ls -la "$HOME/Library/MobileDevice/Certificates" || true
           ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
