@@ -98,6 +98,14 @@ workflows:
           ls -la "$HOME/Library/MobileDevice/Certificates" || true
           ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
 
+      - name: Debug signing output
+        script: |
+          echo "🔎 Checking certificates folder"
+          ls -la "$HOME/Library/MobileDevice/Certificates" || true
+
+          echo "🔎 Checking provisioning profiles"
+          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
+
       - name: Validate p12 password
         script: |
           set -e
