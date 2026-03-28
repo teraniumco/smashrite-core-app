@@ -1,68 +1,41 @@
-integrations:
-  app_store_connect: Codemagic
 workflows:
   ios-release:
     name: Smashrite Core – iOS (Auto-sign + TestFlight)
     max_build_duration: 60
 
     environment:
-      flutter: stable
-      xcode: latest
+      flutter: 3.29.3
+      xcode: 16.3
       cocoapods: default
       groups:
-        - smashrite-vars   # ensure this group exists and contains the vars below
+        - smashrite-vars
+
       vars:
-        BUNDLE_ID: "com.smashrite.core.ios"
+        BUNDLE_ID: com.smashrite.core.ios
+
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: $BUNDLE_ID
 
     scripts:
+      - name: Set iOS bundle identifier dynamically
+        script: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" ios/Runner/Info.plist
 
-      # 1. Install dependencies
-      - name: Get Flutter packages
+          sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/g" ios/Runner.xcodeproj/project.pbxproj
+
+      - name: Install dependencies
         script: flutter pub get
 
-      # 2. Clean build
-      - name: Clean Flutter build
-        script: flutter clean
-
-      # 3. Build iOS (no codesign here — Codemagic handles it)
-      - name: Build iOS release (no codesign)
-        script: flutter build ios --release --no-codesign
-
-      # 4. Enable Codemagic signing
-      - name: Apply Codemagic code signing
-        script: |
-          xcode-project use-profiles
-
-      # 5. Install CocoaPods
-      - name: Install Pods
-        script: |
-          cd ios
-          pod install
-
-      # 6. Archive
-      - name: Archive app
-        script: |
-          xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -archivePath $CM_BUILD_DIR/build/Runner.xcarchive \
-            archive
-
-      # 7. Export IPA (Codemagic-managed signing ONLY)
-      - name: Export IPA
-        script: |
-          xcodebuild -exportArchive \
-            -archivePath $CM_BUILD_DIR/build/Runner.xcarchive \
-            -exportOptionsPlist ios/export_options.plist \
-            -exportPath $CM_BUILD_DIR/build/ipa
+      - name: Build IPA
+        script: flutter build ipa --release
 
     artifacts:
       - build/ios/ipa/*.ipa
-      - build/Runner.xcarchive
 
     publishing:
       app_store_connect:
-        auth: integration
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
-        submit_to_app_store: false
