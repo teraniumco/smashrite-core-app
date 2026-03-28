@@ -1,3 +1,5 @@
+integrations:
+  app_store_connect: Codemagic
 workflows:
   ios-release:
     name: Smashrite Core – iOS (Auto-sign + TestFlight)
@@ -63,3 +65,4 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+        submit_to_app_store: false
