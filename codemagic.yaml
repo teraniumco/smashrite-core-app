@@ -12,11 +12,11 @@ workflows:
 
       vars:
         BUNDLE_ID: com.smashrite.core.ios
+        APPLE_TEAM_ID: "6N74MV2D96"
 
       ios_signing:
         distribution_type: app_store
         bundle_identifier: $BUNDLE_ID
-        team_id: "6N74MV2D96"
 
     scripts:
       - name: Set iOS bundle identifier dynamically
