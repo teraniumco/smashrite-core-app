@@ -11,11 +11,6 @@ workflows:
         - smashrite-vars   # ensure this group exists and contains the vars below
       vars:
         BUNDLE_ID: "com.smashrite.core.ios"
-        APPLE_TEAM_ID: "6N74MV2D96"  # your Apple Developer Team ID
-        COCOAPODS_DISABLE_STATS: "true"
-
-      vars:
-        BUNDLE_ID: "com.smashrite.core.ios"
 
     scripts:
 
