@@ -45,6 +45,9 @@ workflows:
       - name: Initialize keychain
         script: keychain initialize
 
+      - name: Fetch signing profiles (Codemagic managed)
+        script: xcode-project use-profiles
+
       - name: Verify required env vars
         script: |
           set -e
@@ -53,8 +56,6 @@ workflows:
           req APP_STORE_CONNECT_ISSUER_ID "$APP_STORE_CONNECT_ISSUER_ID"
           req APP_STORE_CONNECT_KEY_ID "$APP_STORE_CONNECT_KEY_ID"
           req APP_STORE_CONNECT_PRIVATE_KEY "$APP_STORE_CONNECT_PRIVATE_KEY"
-          req SIGNING_PRIVATE_KEY_PEM "$SIGNING_PRIVATE_KEY_PEM"
-          req IOS_P12_PASSWORD "$IOS_P12_PASSWORD"
           echo "ℹ️ p12 password length: $(printf "%s" "$IOS_P12_PASSWORD" | wc -c)"
 
       - name: Materialize ASC API key (.p8)
@@ -67,55 +68,6 @@ workflows:
           fi
           head -1 AuthKey.p8 || true
           tail -1 AuthKey.p8 || true
-
-      - name: Prepare certificate private key (PEM)
-        script: |
-          set -e
-          printf '%s\n' "$SIGNING_PRIVATE_KEY_PEM" > cert_key.pem
-          openssl rsa -in cert_key.pem -check -noout
-
-      - name: Clean certificates dir (avoid stale p12 conflicts)
-        script: |
-          set -e
-          CERT_DIR="$HOME/Library/MobileDevice/Certificates"
-          mkdir -p "$CERT_DIR"
-          rm -f "$CERT_DIR"/*.p12 || true
-          echo "✅ Certificates dir ready: $CERT_DIR"
-
-      - name: Fetch signing files (App Store) → cert + profiles
-        script: |
-          set -e
-          app-store-connect fetch-signing-files \
-            "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create \
-            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
-            --key-id "$APP_STORE_CONNECT_KEY_ID" \
-            --private-key "$(cat AuthKey.p8)"
-          echo "📁 After fetch:"
-          ls -la "$HOME/Library/MobileDevice/Certificates" || true
-          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
-
-      - name: Debug signing output
-        script: |
-          echo "🔎 Checking certificates folder"
-          ls -la "$HOME/Library/MobileDevice/Certificates" || true
-
-          echo "🔎 Checking provisioning profiles"
-          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
-
-      - name: Validate p12 password
-        script: |
-          set -e
-          CERT_DIR="$HOME/Library/MobileDevice/Certificates"
-          P12="$(ls "$CERT_DIR"/*.p12 | head -n1 || true)"
-          if [ -z "$P12" ]; then echo "❌ No .p12 found"; exit 1; fi
-          echo "🔐 Checking $P12"
-          openssl pkcs12 -in "$P12" -nokeys -passin pass:"$IOS_P12_PASSWORD" -info >/dev/null 2>&1 \
-            && echo "✅ p12 password OK" || { echo "❌ Wrong p12 password"; exit 1; }
-
-      - name: Add certificates to keychain
-        script: keychain add-certificates --certificate-password "$IOS_P12_PASSWORD"
 
       - name: Use the fetched provisioning profiles
         script: xcode-project use-profiles
