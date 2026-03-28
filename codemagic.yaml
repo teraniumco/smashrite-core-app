@@ -13,6 +13,9 @@ workflows:
         APPLE_TEAM_ID: "6N74MV2D96"  # your Apple Developer Team ID
         COCOAPODS_DISABLE_STATS: "true"
     scripts:
+      - name: Flutter clean
+        script: flutter clean
+
       - name: Flutter deps
         script: flutter pub get
 
