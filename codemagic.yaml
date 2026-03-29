@@ -31,13 +31,6 @@ workflows:
     #   Any strong password string e.g. "Smashrite@2026!" — just store it in the var
     # ---------------------------------------------------------------------------
 
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: main
-          include: true
-
     scripts:
 
       # ── 1. Flutter clean ────────────────────────────────────────────────────
