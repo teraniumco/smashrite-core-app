@@ -84,6 +84,12 @@ workflows:
           echo "ℹ️  All required secrets present."
           echo "ℹ️  Certificate & provisioning profile managed by Codemagic automatic signing."
 
+      - name: Debug API key presence
+        script: |
+          echo "KEY_ID: $APP_STORE_CONNECT_KEY_ID"
+          echo "ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID"
+          echo "KEY LENGTH: ${#APP_STORE_CONNECT_PRIVATE_KEY}"
+
       # ── 6. Force iPhone-only (no iPad) ────────────────────────────────────
       - name: Force iPhone-only build
         script: |
@@ -393,8 +399,9 @@ workflows:
     # ── Publishing ───────────────────────────────────────────────────────────
     publishing:
       app_store_connect:
-        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
-        key_id: $APP_STORE_CONNECT_KEY_ID
-        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        api_key:
+          key_id: $APP_STORE_CONNECT_KEY_ID
+          issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+          key: $APP_STORE_CONNECT_PRIVATE_KEY
         submit_to_testflight: true
         submit_to_app_store: false
