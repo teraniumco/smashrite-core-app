@@ -15,7 +15,7 @@ workflows:
         COCOAPODS_DISABLE_STATS: "true"
 
     # ---------------------------------------------------------------------------
-    # Required env vars in the "smashrite-vars"  group on Codemagic dashboard:
+    # Required env vars in the "smashrite-vars" group on Codemagic dashboard:
     #
     #   APP_STORE_CONNECT_ISSUER_ID   → App Store Connect → Users & Access → API → Issuer ID
     #   APP_STORE_CONNECT_KEY_ID      → App Store Connect → Users & Access → API → Key ID
@@ -107,7 +107,7 @@ workflows:
       - name: Clean stale certificates
         script: |
           set -e
-          CERT_DIR="$HOME/Library/MobileDevice/Certificates"
+          CERT_DIR="$HOME/Library/Developer/Xcode/UserData/Certificates"
           mkdir -p "$CERT_DIR"
           rm -f "$CERT_DIR"/*.p12 || true
           echo "✅ Certificates dir clean: $CERT_DIR"
@@ -130,14 +130,22 @@ workflows:
           ls -la "$HOME/Library/MobileDevice/Certificates" || true
           echo "📁 Provisioning Profiles:"
           ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
+          echo "📁 Xcode Certificates:"
+          ls -la "$HOME/Library/Developer/Xcode/UserData/Certificates" || true
+          echo "📁 Xcode Provisioning Profiles:"
+          ls -la "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" || true
+          echo "📁 MobileDevice Certificates:"
+          ls -la "$HOME/Library/MobileDevice/Certificates" || true
+          echo "📁 MobileDevice Provisioning Profiles:"
+          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
 
       # ── 10. Validate p12 password ────────────────────────────────────────────
       - name: Validate p12 password
         script: |
           set -e
-          CERT_DIR="$HOME/Library/MobileDevice/Certificates"
+          CERT_DIR="$HOME/Library/Developer/Xcode/UserData/Certificates"
           P12="$(ls "$CERT_DIR"/*.p12 2>/dev/null | head -n1 || true)"
-          [ -n "$P12" ] || { echo "❌ No .p12 found — fetch-signing-files may have failed"; exit 1; }
+          [ -n "$P12" ] || { echo "❌ No .p12 found in $CERT_DIR"; exit 1; }
           echo "🔐 Validating: $P12"
           openssl pkcs12 \
             -in "$P12" \
@@ -149,7 +157,11 @@ workflows:
 
       # ── 11. Add certificate to keychain ─────────────────────────────────────
       - name: Add certificate to keychain
-        script: keychain add-certificates --certificate-password "$IOS_P12_PASSWORD"
+        script: |
+          CERT_DIR="$HOME/Library/Developer/Xcode/UserData/Certificates"
+          keychain add-certificates \
+            --certificate "$CERT_DIR"/*.p12 \
+            --certificate-password "$IOS_P12_PASSWORD"
 
       # ── 12. Apply provisioning profiles ─────────────────────────────────────
       - name: Apply provisioning profiles
@@ -430,7 +442,7 @@ workflows:
           PROFILE_NAME=""
           echo "🔎 Scanning installed provisioning profiles…"
 
-          for f in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
+          for f in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision; do
             [ -f "$f" ] || continue
             TMP="$(mktemp)"
             /usr/bin/security cms -D -i "$f" > "$TMP" 2>/dev/null || { rm -f "$TMP"; continue; }
