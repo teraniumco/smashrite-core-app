@@ -432,6 +432,9 @@ workflows:
         script: |
           set -euo pipefail
 
+          # Re-fetch signing assets — keychain session from step 4 may have expired
+          xcode-project use-profiles
+
           ARCHIVE="build/ios/archive/Runner.xcarchive"
           mkdir -p "$(dirname "$ARCHIVE")"
 
@@ -441,23 +444,15 @@ workflows:
             -configuration Release \
             -archivePath "$ARCHIVE" \
             -destination 'generic/platform=iOS' \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             archive \
             | xcpretty || {
               echo "❌ xcodebuild archive failed"
               exit 1
             }
 
-          if [ ! -d "$ARCHIVE" ]; then
-            echo "❌ Archive not found at $ARCHIVE"
-            FOUND="$(find build -type d -name '*.xcarchive' | head -n1 || true)"
-            if [ -n "$FOUND" ]; then
-              echo "ℹ️  Found alternate archive at: $FOUND — symlinking"
-              ln -s "$FOUND" "$ARCHIVE"
-            else
-              exit 1
-            fi
-          fi
-
+          [ -d "$ARCHIVE" ] || { echo "❌ Archive not found at $ARCHIVE"; exit 1; }
           echo "✅ Archive created: $ARCHIVE"
 
       # ── 17. Diagnostic: show build output tree ────────────────────────────
@@ -475,7 +470,6 @@ workflows:
         script: |
           set -euo pipefail
 
-          # Skip if a previous step already produced an IPA
           if ls build/ios/ipa/*.ipa >/dev/null 2>&1; then
             echo "✅ IPA already present — skipping export"
             exit 0
@@ -486,13 +480,15 @@ workflows:
           EXPORT_PLIST="$EXPORT_DIR/ExportOptions.plist"
           mkdir -p "$EXPORT_DIR"
 
-          # Automatic signing — no manual profile lookup needed
-          /usr/libexec/PlistBuddy -c "Add :method              string  app-store"        "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :teamID               string  $APPLE_TEAM_ID"  "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :destination          string  export"           "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :signingStyle         string  automatic"        "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :uploadSymbols        bool    true"             "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :compileBitcode       bool    false"            "$EXPORT_PLIST"
+          # ✅ method is now "app-store-connect" (not deprecated "app-store")
+          # ✅ allowProvisioningUpdates lets Xcode resolve signing on the fly
+          /usr/libexec/PlistBuddy -c "Add :method                   string  app-store-connect" "$EXPORT_PLIST"
+          /usr/libexec/PlistBuddy -c "Add :teamID                    string  $APPLE_TEAM_ID"   "$EXPORT_PLIST"
+          /usr/libexec/PlistBuddy -c "Add :destination               string  export"           "$EXPORT_PLIST"
+          /usr/libexec/PlistBuddy -c "Add :signingStyle              string  automatic"        "$EXPORT_PLIST"
+          /usr/libexec/PlistBuddy -c "Add :allowProvisioningUpdates  bool    true"             "$EXPORT_PLIST"
+          /usr/libexec/PlistBuddy -c "Add :uploadSymbols             bool    true"             "$EXPORT_PLIST"
+          /usr/libexec/PlistBuddy -c "Add :compileBitcode            bool    false"            "$EXPORT_PLIST"
 
           echo "📝 ExportOptions.plist:"
           cat "$EXPORT_PLIST"
@@ -502,6 +498,7 @@ workflows:
             -archivePath "$ARCHIVE" \
             -exportOptionsPlist "$EXPORT_PLIST" \
             -exportPath "$EXPORT_DIR" \
+            -allowProvisioningUpdates \
             | xcpretty
 
           ls -lh "$EXPORT_DIR"
