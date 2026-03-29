@@ -15,7 +15,7 @@ workflows:
         COCOAPODS_DISABLE_STATS: "true"
 
     # ---------------------------------------------------------------------------
-    # Required env vars in the "smashrite-vars" group on Codemagic dashboard:
+    # Required env vars in the "smashrite-vars"  group on Codemagic dashboard:
     #
     #   APP_STORE_CONNECT_ISSUER_ID   → App Store Connect → Users & Access → API → Issuer ID
     #   APP_STORE_CONNECT_KEY_ID      → App Store Connect → Users & Access → API → Key ID
