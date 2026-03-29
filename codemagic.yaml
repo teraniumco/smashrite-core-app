@@ -72,9 +72,6 @@ workflows:
       - name: Initialize keychain
         script: keychain initialize
 
-      - name: Fetch signing assets (Codemagic automatic signing)
-        script: xcode-project use-profiles
-
       # ── 5. Sanity-check required env vars ─────────────────────────────────
       - name: Verify required env vars
         script: |
@@ -370,94 +367,11 @@ workflows:
               exit 0
 
 
-      # ── 16. Write ExportOptions.plist (dynamic profile name) ──────────────
-      - name: Write ExportOptions.plist
-        script: |
-          set -e
-          mkdir -p ios
-
-          # Find the exact name of the provisioning profile Codemagic installed
-          PROFILE_NAME=""
-          for f in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
-            [ -f "$f" ] || continue
-            TMP="$(mktemp)"
-            /usr/bin/security cms -D -i "$f" > "$TMP" 2>/dev/null || { rm -f "$TMP"; continue; }
-
-            BID="$(/usr/libexec/PlistBuddy \
-                    -c 'Print Entitlements:application-identifier' "$TMP" 2>/dev/null \
-                    | sed 's/^[^.]*\.//')"
-            TEAM="$(/usr/libexec/PlistBuddy \
-                     -c 'Print TeamIdentifier:0' "$TMP" 2>/dev/null || true)"
-            NAME="$(/usr/libexec/PlistBuddy -c 'Print Name' "$TMP" 2>/dev/null || true)"
-            /usr/libexec/PlistBuddy -c 'Print ProvisionedDevices' "$TMP" \
-              >/dev/null 2>&1 && HAS_DEVICES=1 || HAS_DEVICES=0
-            GTL="$(/usr/libexec/PlistBuddy \
-                    -c 'Print Entitlements:get-task-allow' "$TMP" 2>/dev/null || echo false)"
-            rm -f "$TMP"
-
-            echo "  checking: BID=$BID TEAM=$TEAM HAS_DEVICES=$HAS_DEVICES GTL=$GTL NAME=$NAME"
-
-            if [ "$BID" = "$BUNDLE_ID" ] \
-                && [ "$TEAM" = "$APPLE_TEAM_ID" ] \
-                && [ "$HAS_DEVICES" -eq 0 ] \
-                && [ "$GTL" = "false" ]; then
-              PROFILE_NAME="$NAME"
-              echo "✅ Matched profile: $PROFILE_NAME"
-              break
-            fi
-          done
-
-          if [ -z "$PROFILE_NAME" ]; then
-            echo "❌ No matching App Store provisioning profile found for $BUNDLE_ID ($APPLE_TEAM_ID)"
-            echo "ℹ️  Listing ALL installed profiles for diagnosis:"
-            for f in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
-              [ -f "$f" ] || continue
-              TMP="$(mktemp)"
-              /usr/bin/security cms -D -i "$f" > "$TMP" 2>/dev/null || { rm -f "$TMP"; continue; }
-              echo "  ---"
-              /usr/libexec/PlistBuddy -c 'Print Name' "$TMP" 2>/dev/null || true
-              /usr/libexec/PlistBuddy -c 'Print Entitlements:application-identifier' "$TMP" 2>/dev/null || true
-              /usr/libexec/PlistBuddy -c 'Print TeamIdentifier:0' "$TMP" 2>/dev/null || true
-              rm -f "$TMP"
-            done
-            exit 1
-          fi
-
-          cat > ios/ExportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store-connect</string>
-            <key>teamID</key>
-            <string>${APPLE_TEAM_ID}</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>signingCertificate</key>
-            <string>Apple Distribution</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>${BUNDLE_ID}</key>
-              <string>${PROFILE_NAME}</string>
-            </dict>
-            <key>uploadSymbols</key>
-            <true/>
-            <key>compileBitcode</key>
-            <false/>
-          </dict>
-          </plist>
-          EOF
-
-          echo "✅ ExportOptions.plist written with profile: $PROFILE_NAME"
-          cat ios/ExportOptions.plist
-
       # ── 17. Build IPA (Flutter-native, uses Codemagic-installed signing) ──
       - name: Flutter build IPA
         script: |
           set -euo pipefail
-          flutter build ipa --release \
-            --export-options-plist=ios/ExportOptions.plist
+          flutter build ipa --release
           echo "✅ IPA built"
           find build/ios/ipa -name "*.ipa" | xargs ls -lh
 
