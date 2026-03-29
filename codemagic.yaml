@@ -370,68 +370,59 @@ workflows:
               exit 0
 
 
-
-      # ── 15. Build Flutter iOS release (signing handled by Xcode archive) ──
-      - name: Flutter build iOS (no-codesign)
-        script: |
-          set -euo pipefail
-          export NSUnbufferedIO=YES
-
-          LOG="build_ios_verbose.log"
-          BUILD_FAILED=0
-
-          flutter build ios --release --no-codesign -v 2>&1 | tee "$LOG" \
-            || BUILD_FAILED=1
-
-          if [ "$BUILD_FAILED" -ne 0 ]; then
-            echo "❌ Flutter iOS build failed. Checking for xcresult…"
-
-            XCRESULT="$(awk \
-              '/Result bundle written to path:/ {getline; gsub(/^ *|\r$/,""); print; exit}' \
-              "$LOG" || true)"
-
-            if [ -n "${XCRESULT:-}" ] && [ -d "$XCRESULT" ]; then
-              echo "📦 xcresult found: $XCRESULT"
-              xcrun xcresulttool get --path "$XCRESULT" --format json \
-                > xcresult.json 2>/dev/null || true
-              python3 - <<'PY'
-          import json, sys
-          try:
-              d = json.load(open('xcresult.json'))
-          except Exception as e:
-              print("Could not parse xcresult.json:", e); sys.exit(0)
-          def walk(o):
-              if isinstance(o, dict):
-                  t = o.get('_type', {}).get('_name')
-                  if t == 'IssueSummary':
-                      sev = o.get('issueType',  {}).get('_value', 'ISSUE')
-                      msg = o.get('message',     {}).get('text',  '').strip()
-                      loc = o.get('documentLocationInCreatingWorkspace', {}).get('urlString', '')
-                      if msg:
-                          print(f"[{sev}] {msg}")
-                          if loc: print(f"  → {loc}")
-                  for v in o.values(): walk(v)
-              elif isinstance(o, list):
-                  for v in o: walk(v)
-          walk(d)
-          PY
-            else
-              echo "ℹ️  No xcresult available. Last 200 lines of Flutter log:"
-              tail -n 200 "$LOG"
-              echo "--- Common error patterns ---"
-              grep -iE 'error:|exception|No file or variants|AssetNotFound' "$LOG" \
-                | tail -n 50 || true
-            fi
-            exit 1
-          fi
-
-          echo "✅ Flutter iOS compile succeeded"
-
-      # ── 16. Write ExportOptions.plist ─────────────────────────────────────
+      # ── 16. Write ExportOptions.plist (dynamic profile name) ──────────────
       - name: Write ExportOptions.plist
         script: |
           set -e
           mkdir -p ios
+
+          # Find the exact name of the provisioning profile Codemagic installed
+          PROFILE_NAME=""
+          for f in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
+            [ -f "$f" ] || continue
+            TMP="$(mktemp)"
+            /usr/bin/security cms -D -i "$f" > "$TMP" 2>/dev/null || { rm -f "$TMP"; continue; }
+
+            BID="$(/usr/libexec/PlistBuddy \
+                    -c 'Print Entitlements:application-identifier' "$TMP" 2>/dev/null \
+                    | sed 's/^[^.]*\.//')"
+            TEAM="$(/usr/libexec/PlistBuddy \
+                     -c 'Print TeamIdentifier:0' "$TMP" 2>/dev/null || true)"
+            NAME="$(/usr/libexec/PlistBuddy -c 'Print Name' "$TMP" 2>/dev/null || true)"
+            /usr/libexec/PlistBuddy -c 'Print ProvisionedDevices' "$TMP" \
+              >/dev/null 2>&1 && HAS_DEVICES=1 || HAS_DEVICES=0
+            GTL="$(/usr/libexec/PlistBuddy \
+                    -c 'Print Entitlements:get-task-allow' "$TMP" 2>/dev/null || echo false)"
+            rm -f "$TMP"
+
+            echo "  checking: BID=$BID TEAM=$TEAM HAS_DEVICES=$HAS_DEVICES GTL=$GTL NAME=$NAME"
+
+            if [ "$BID" = "$BUNDLE_ID" ] \
+                && [ "$TEAM" = "$APPLE_TEAM_ID" ] \
+                && [ "$HAS_DEVICES" -eq 0 ] \
+                && [ "$GTL" = "false" ]; then
+              PROFILE_NAME="$NAME"
+              echo "✅ Matched profile: $PROFILE_NAME"
+              break
+            fi
+          done
+
+          if [ -z "$PROFILE_NAME" ]; then
+            echo "❌ No matching App Store provisioning profile found for $BUNDLE_ID ($APPLE_TEAM_ID)"
+            echo "ℹ️  Listing ALL installed profiles for diagnosis:"
+            for f in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
+              [ -f "$f" ] || continue
+              TMP="$(mktemp)"
+              /usr/bin/security cms -D -i "$f" > "$TMP" 2>/dev/null || { rm -f "$TMP"; continue; }
+              echo "  ---"
+              /usr/libexec/PlistBuddy -c 'Print Name' "$TMP" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c 'Print Entitlements:application-identifier' "$TMP" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c 'Print TeamIdentifier:0' "$TMP" 2>/dev/null || true
+              rm -f "$TMP"
+            done
+            exit 1
+          fi
+
           cat > ios/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -440,24 +431,25 @@ workflows:
             <key>method</key>
             <string>app-store-connect</string>
             <key>teamID</key>
-            <string>$APPLE_TEAM_ID</string>
-            <key>uploadSymbols</key>
-            <true/>
-            <key>compileBitcode</key>
-            <false/>
+            <string>${APPLE_TEAM_ID}</string>
             <key>signingStyle</key>
             <string>manual</string>
             <key>signingCertificate</key>
             <string>Apple Distribution</string>
             <key>provisioningProfiles</key>
             <dict>
-              <key>$BUNDLE_ID</key>
-              <string>match AppStore $BUNDLE_ID</string>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
             </dict>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>compileBitcode</key>
+            <false/>
           </dict>
           </plist>
           EOF
-          echo "✅ ExportOptions.plist written"
+
+          echo "✅ ExportOptions.plist written with profile: $PROFILE_NAME"
           cat ios/ExportOptions.plist
 
       # ── 17. Build IPA (Flutter-native, uses Codemagic-installed signing) ──
@@ -473,9 +465,10 @@ workflows:
       - name: Show build output tree
         script: |
           echo "=== build/ios layout ==="
-          find build/ios -maxdepth 4 \( -type d -o -type f \) | sort | sed 's/^/  /'
+          find build/ios -maxdepth 5 \( -type d -o -type f \) | sort | sed 's/^/  /'
           echo "=== IPA ==="
-          ls -lh build/ios/ipa/*.ipa 2>/dev/null || echo "  (no IPA found)"
+          find build/ios -name "*.ipa" 2>/dev/null | xargs ls -lh 2>/dev/null \
+            || echo "  (no IPA found — check step 17 logs)"
 
     # ── Artifacts ────────────────────────────────────────────────────────────
     artifacts:
