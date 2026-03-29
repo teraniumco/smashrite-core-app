@@ -21,19 +21,23 @@ workflows:
     #   APP_STORE_CONNECT_KEY_ID      → App Store Connect → Users & Access → API → Key ID
     #   APP_STORE_CONNECT_PRIVATE_KEY → Full contents of the downloaded .p8 file
     #   SIGNING_PRIVATE_KEY_PEM       → RSA private key used to create distribution cert
-    #   IOS_P12_PASSWORD              → Password for the .p12 Codemagic creates
-    #
-    # HOW TO GENERATE SIGNING_PRIVATE_KEY_PEM (one-time, on Windows PowerShell):
-    #   openssl genrsa -out cert_key.pem 2048
-    #   Then copy the full contents of cert_key.pem into SIGNING_PRIVATE_KEY_PEM
-    #
-    # HOW TO CHOOSE IOS_P12_PASSWORD:
-    #   Any strong password string e.g. "Smashrite@2026!" — just store it in the var
+    #                                   Generate on Windows PowerShell (one-time):
+    #                                     openssl genrsa -out cert_key.pem 2048
+    #                                     Get-Content cert_key.pem
+    #                                   Paste full output (including headers) into this var
+    #   IOS_P12_PASSWORD              → Any strong password e.g. "Smashrite@2026!"
     # ---------------------------------------------------------------------------
+
+    # triggering:
+    #   events:
+    #     - push
+    #   branch_patterns:
+    #     - pattern: main
+    #       include: true
 
     scripts:
 
-      # ── 1. Flutter clean ────────────────────────────────────────────────────
+      # ── 1. Clean slate ──────────────────────────────────────────────────────
       - name: Flutter clean
         script: flutter clean
 
@@ -41,7 +45,7 @@ workflows:
       - name: Flutter deps
         script: flutter pub get
 
-      # ── 3. Replace Bundle ID (iOS only — Android keeps com.smashrite.core) ─
+      # ── 3. Replace Bundle ID (iOS gets .ios suffix; Android keeps original) ─
       - name: Replace Bundle ID for iOS
         script: |
           set -e
@@ -67,7 +71,7 @@ workflows:
       - name: Initialize keychain
         script: keychain initialize
 
-      # ── 5. Sanity-check all required secrets ────────────────────────────────
+      # ── 5. Verify all required secrets ─────────────────────────────────────
       - name: Verify required env vars
         script: |
           set -e
@@ -84,7 +88,6 @@ workflows:
       - name: Materialize ASC API key (.p8)
         script: |
           set -e
-          # Handle both literal \n and real newlines in the stored secret
           if printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" | grep -q '\\n'; then
             printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" | sed 's/\\n/\n/g' > AuthKey.p8
           else
@@ -100,7 +103,7 @@ workflows:
           set -e
           printf '%s\n' "$SIGNING_PRIVATE_KEY_PEM" > cert_key.pem
           openssl rsa -in cert_key.pem -check -noout \
-            && echo "✅ cert_key.pem is valid RSA key" \
+            && echo "✅ cert_key.pem is a valid RSA key" \
             || { echo "❌ cert_key.pem is invalid — check SIGNING_PRIVATE_KEY_PEM"; exit 1; }
 
       # ── 8. Clean stale certificates (avoid p12 import conflicts) ────────────
@@ -112,7 +115,7 @@ workflows:
           rm -f "$CERT_DIR"/*.p12 || true
           echo "✅ Certificates dir clean: $CERT_DIR"
 
-      # ── 9. Fetch signing files (cert + provisioning profile) ────────────────
+      # ── 9. Fetch signing files (creates cert + provisioning profile) ─────────
       - name: Fetch signing files (App Store)
         script: |
           set -e
@@ -120,16 +123,12 @@ workflows:
             "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --create \
-            --issuer-id        "$APP_STORE_CONNECT_ISSUER_ID" \
-            --key-id           "$APP_STORE_CONNECT_KEY_ID" \
-            --private-key      "$(cat AuthKey.p8)" \
-            --certificate-key  "$(cat cert_key.pem)" \
-            --p12-password     "$IOS_P12_PASSWORD"
+            --issuer-id       "$APP_STORE_CONNECT_ISSUER_ID" \
+            --key-id          "$APP_STORE_CONNECT_KEY_ID" \
+            --private-key     "$(cat AuthKey.p8)" \
+            --certificate-key "$(cat cert_key.pem)" \
+            --p12-password    "$IOS_P12_PASSWORD"
 
-          echo "📁 Certificates:"
-          ls -la "$HOME/Library/MobileDevice/Certificates" || true
-          echo "📁 Provisioning Profiles:"
-          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
           echo "📁 Xcode Certificates:"
           ls -la "$HOME/Library/Developer/Xcode/UserData/Certificates" || true
           echo "📁 Xcode Provisioning Profiles:"
@@ -145,7 +144,7 @@ workflows:
           set -e
           CERT_DIR="$HOME/Library/Developer/Xcode/UserData/Certificates"
           P12="$(ls "$CERT_DIR"/*.p12 2>/dev/null | head -n1 || true)"
-          [ -n "$P12" ] || { echo "❌ No .p12 found in $CERT_DIR"; exit 1; }
+          [ -n "$P12" ] || { echo "❌ No .p12 found in $CERT_DIR — fetch-signing-files may have failed"; exit 1; }
           echo "🔐 Validating: $P12"
           openssl pkcs12 \
             -in "$P12" \
@@ -153,7 +152,7 @@ workflows:
             -passin "pass:$IOS_P12_PASSWORD" \
             -info >/dev/null 2>&1 \
             && echo "✅ p12 password correct" \
-            || { echo "❌ p12 password wrong — check IOS_P12_PASSWORD"; exit 1; }
+            || { echo "❌ p12 password mismatch — check IOS_P12_PASSWORD"; exit 1; }
 
       # ── 11. Add certificate to keychain ─────────────────────────────────────
       - name: Add certificate to keychain
@@ -167,7 +166,7 @@ workflows:
       - name: Apply provisioning profiles
         script: xcode-project use-profiles
 
-      # ── 13. Force iPhone-only ────────────────────────────────────────────────
+      # ── 13. Force iPhone-only (no iPad) ─────────────────────────────────────
       - name: Force iPhone-only build
         script: |
           set -e
@@ -191,7 +190,6 @@ workflows:
           set -e
           cd ios
 
-          # Podfile platform line
           if grep -qE "^platform :ios," Podfile; then
             sed -i.bak "s/^platform :ios, *['\"][0-9.]*['\"]/platform :ios, '14.0'/" Podfile
           else
@@ -200,20 +198,17 @@ workflows:
           rm -f Podfile.bak
           cd ..
 
-          # Runner project
           PBX="ios/Runner.xcodeproj/project.pbxproj"
           sed -i '' -E \
             's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+;/IPHONEOS_DEPLOYMENT_TARGET = 14.0;/g' \
             "$PBX"
 
-          # AppFrameworkInfo.plist
           FWPLIST="ios/Flutter/AppFrameworkInfo.plist"
           if [ -f "$FWPLIST" ]; then
             /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 14.0" "$FWPLIST" 2>/dev/null \
               || /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string 14.0" "$FWPLIST"
           fi
 
-          # Generated.xcconfig
           GEN="ios/Flutter/Generated.xcconfig"
           if [ -f "$GEN" ]; then
             if grep -q "^IPHONEOS_DEPLOYMENT_TARGET=" "$GEN"; then
@@ -396,51 +391,15 @@ workflows:
           /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -A1 "NS.*Usage" || true
 
       # ── 21. Regenerate iOS app icons (no alpha) ──────────────────────────────
-      # - name: Regenerate iOS app icons
-      #   script: |
-      #     set -e
-      #     ICON_SRC="assets/icons/ios/1024x1024.png"
-      #     ICONSET="ios/Runner/Assets.xcassets/AppIcon.appiconset"
-
-      #     [ -f "$ICON_SRC" ] \
-      #       || { echo "❌ $ICON_SRC missing — add a 1024×1024 opaque PNG"; exit 1; }
-
-      #     mkdir -p "$ICONSET"
-      #     [ -f "$ICONSET/Contents.json" ] || cat > "$ICONSET/Contents.json" <<'JSON'
-      #     {
-      #       "images": [],
-      #       "info": { "version": 1, "author": "xcode" }
-      #     }
-      #     JSON
-
-      #     # Generate iOS icons — fail loudly if this breaks
-      #     dart run flutter_launcher_icons -p ios
-      #     echo "✅ Icons generated"
-
-      #     # ios-marketing (1024×1024) is mandatory for App Store
-      #     grep -q '"idiom".*"ios-marketing"' "$ICONSET/Contents.json" \
-      #       || { echo "❌ ios-marketing entry missing in Contents.json"; exit 1; }
-
-      #     # Apple rejects icons with alpha channel
-      #     BAD=0
-      #     for p in "$ICONSET"/*.png; do
-      #       [ -f "$p" ] || continue
-      #       ALPHA=$(sips -g hasAlpha "$p" 2>/dev/null | awk '/hasAlpha:/ {print $2}')
-      #       [ "$ALPHA" = "yes" ] && { echo "❌ Alpha detected: $p"; BAD=1; }
-      #     done
-      #     [ "$BAD" -eq 0 ] \
-      #       && echo "✅ All icons are opaque" \
-      #       || { echo "❌ Remove alpha from icon source PNG and retry"; exit 1; }
-
-      - name: Regenerate iOS app icons (no alpha)
+      - name: Regenerate iOS app icons
         script: |
           set -e
-
-          # 0) Ensure source icon exists (1024x1024 opaque PNG)
-          test -f assets/icons/ios/1024x1024.png || { echo "❌ assets/icons/ios/1024x1024.png missing"; exit 1; }
-
-          # 1) Ensure iOS icon dirs exist so generator doesn't choke
+          ICON_SRC="assets/icons/ios/1024x1024.png"
           ICONSET_DIR="ios/Runner/Assets.xcassets/AppIcon.appiconset"
+
+          [ -f "$ICON_SRC" ] \
+            || { echo "❌ $ICON_SRC missing — add a 1024×1024 opaque PNG"; exit 1; }
+
           mkdir -p "$ICONSET_DIR"
           [ -f "$ICONSET_DIR/Contents.json" ] || cat > "$ICONSET_DIR/Contents.json" <<'JSON'
           {
@@ -449,50 +408,43 @@ workflows:
           }
           JSON
 
-              # 2) Run generator ONLY for iOS to avoid the "No platform provided" warning
-              #    (and ignore any non-zero due to benign warnings)
-              dart run flutter_launcher_icons -p ios || true
-              echo "✓ Successfully generated launcher icons (iOS)"
+          # Generate iOS icons — fail loudly on real errors
+          dart run flutter_launcher_icons -p ios
+          echo "✅ Icons generated"
 
-              # 3) Verify ios-marketing entry exists
-              if ! grep -q '"idiom" *: *"ios-marketing"' "$ICONSET_DIR/Contents.json"; then
-                echo "❌ ios-marketing (1024x1024) icon not listed"; exit 1
-              fi
+          # ios-marketing (1024×1024) is mandatory for App Store
+          grep -q '"idiom".*"ios-marketing"' "$ICONSET_DIR/Contents.json" \
+            || { echo "❌ ios-marketing (1024×1024) entry missing"; exit 1; }
 
-              # 4) Ensure no alpha in any generated PNGs
-              if command -v sips >/dev/null 2>&1; then
-                bad=0
-                for p in "$ICONSET_DIR"/*.png; do
-                  [ -f "$p" ] || continue
-                  has_alpha=$(sips -g hasAlpha "$p" 2>/dev/null | awk '/hasAlpha:/ {print $2}')
-                  if [ "$has_alpha" = "yes" ]; then
-                    echo "❌ $p has alpha"
-                    bad=1
-                  fi
-                done
-                [ "$bad" -eq 0 ] && echo "✅ All iOS icons are opaque (no alpha)" || { echo "❌ Alpha detected"; exit 1; }
-              else
-                echo "ℹ️ 'sips' not available; skipping alpha check"
-              fi
+          # Apple rejects icons with alpha channel
+          if command -v sips >/dev/null 2>&1; then
+            BAD=0
+            for p in "$ICONSET_DIR"/*.png; do
+              [ -f "$p" ] || continue
+              ALPHA=$(sips -g hasAlpha "$p" 2>/dev/null | awk '/hasAlpha:/ {print $2}')
+              [ "$ALPHA" = "yes" ] && { echo "❌ Alpha detected: $p"; BAD=1; }
+            done
+            [ "$BAD" -eq 0 ] \
+              && echo "✅ All icons are opaque (no alpha)" \
+              || { echo "❌ Remove alpha from source PNG and retry"; exit 1; }
+          else
+            echo "ℹ️  sips not available — skipping alpha check"
+          fi
 
-              # 5) Force success for this step if we reach here
-              exit 0
-
-
-      # ── 22. Write ExportOptions.plist (dynamic profile name) ─────────────────
+      # ── 22. Write ExportOptions.plist (detects installed profile name) ────────
       - name: Write ExportOptions.plist
         script: |
           set -e
           mkdir -p build/ios/ipa
 
-          # Detect the exact name of the provisioning profile Codemagic installed
           PROFILE_NAME=""
           echo "🔎 Scanning installed provisioning profiles…"
 
           for f in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision; do
             [ -f "$f" ] || continue
             TMP="$(mktemp)"
-            /usr/bin/security cms -D -i "$f" > "$TMP" 2>/dev/null || { rm -f "$TMP"; continue; }
+            /usr/bin/security cms -D -i "$f" > "$TMP" 2>/dev/null \
+              || { rm -f "$TMP"; continue; }
 
             BID="$(/usr/libexec/PlistBuddy \
                     -c 'Print Entitlements:application-identifier' "$TMP" 2>/dev/null \
@@ -510,20 +462,19 @@ workflows:
 
             echo "  → BID=$BID | TEAM=$TEAM | DEVICES=$HAS_DEVICES | GTL=$GTL | NAME=$NAME"
 
-            # Match: correct bundle ID + team + App Store type (no devices, get-task-allow=false)
             if [ "$BID" = "$BUNDLE_ID" ] \
                 && [ "$TEAM" = "$APPLE_TEAM_ID" ] \
                 && [ "$HAS_DEVICES" -eq 0 ] \
                 && [ "$GTL" = "false" ]; then
               PROFILE_NAME="$NAME"
-              echo "✅ Matched: $PROFILE_NAME"
+              echo "✅ Matched profile: $PROFILE_NAME"
               break
             fi
           done
 
           if [ -z "$PROFILE_NAME" ]; then
             echo "❌ No matching App Store profile found for $BUNDLE_ID ($APPLE_TEAM_ID)"
-            echo "ℹ️  All installed profiles listed above — check BID/TEAM/DEVICES/GTL values"
+            echo "ℹ️  All profiles listed above — check BID/TEAM/DEVICES/GTL values"
             exit 1
           fi
 
@@ -558,9 +509,6 @@ workflows:
           cat "$EXPORT_PLIST"
 
       # ── 23. Flutter build IPA ────────────────────────────────────────────────
-      #    Single command — replaces the old 3-step
-      #    (flutter build ios --no-codesign → xcodebuild archive → xcodebuild -exportArchive)
-      #    which caused "No Accounts" errors on CI machines.
       - name: Flutter build IPA
         script: |
           set -euo pipefail
@@ -606,7 +554,7 @@ workflows:
           walk(d)
           PY
             else
-              echo "ℹ️  No xcresult found. Last 200 lines:"
+              echo "ℹ️  No xcresult found. Last 200 lines of build log:"
               tail -n 200 "$LOG"
               echo "--- Common error patterns ---"
               grep -iE 'error:|exception|No file or variants|AssetNotFound' "$LOG" \
