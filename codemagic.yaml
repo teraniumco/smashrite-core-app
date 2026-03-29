@@ -427,82 +427,55 @@ workflows:
 
           echo "✅ Flutter iOS compile succeeded"
 
-      # ── 16. Archive with Xcode ─────────────────────────────────────────────
-      - name: Archive with Xcode
+      # ── 16. Write ExportOptions.plist ─────────────────────────────────────
+      - name: Write ExportOptions.plist
+        script: |
+          set -e
+          mkdir -p ios
+          cat > ios/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>$APPLE_TEAM_ID</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>compileBitcode</key>
+            <false/>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$BUNDLE_ID</key>
+              <string>match AppStore $BUNDLE_ID</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+          echo "✅ ExportOptions.plist written"
+          cat ios/ExportOptions.plist
+
+      # ── 17. Build IPA (Flutter-native, uses Codemagic-installed signing) ──
+      - name: Flutter build IPA
         script: |
           set -euo pipefail
+          flutter build ipa --release \
+            --export-options-plist=ios/ExportOptions.plist
+          echo "✅ IPA built"
+          find build/ios/ipa -name "*.ipa" | xargs ls -lh
 
-          # Re-fetch signing assets — keychain session from step 4 may have expired
-          xcode-project use-profiles
-
-          ARCHIVE="build/ios/archive/Runner.xcarchive"
-          mkdir -p "$(dirname "$ARCHIVE")"
-
-          xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -archivePath "$ARCHIVE" \
-            -destination 'generic/platform=iOS' \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            archive \
-            | xcpretty || {
-              echo "❌ xcodebuild archive failed"
-              exit 1
-            }
-
-          [ -d "$ARCHIVE" ] || { echo "❌ Archive not found at $ARCHIVE"; exit 1; }
-          echo "✅ Archive created: $ARCHIVE"
-
-      # ── 17. Diagnostic: show build output tree ────────────────────────────
+      # ── 18. Show build output tree ─────────────────────────────────────────
       - name: Show build output tree
         script: |
           echo "=== build/ios layout ==="
           find build/ios -maxdepth 4 \( -type d -o -type f \) | sort | sed 's/^/  /'
-          echo "=== IPA candidates ==="
-          ls -lh build/ios/ipa/ 2>/dev/null || echo "  (none yet)"
-          echo "=== Archive ==="
-          ls -lh build/ios/archive/ 2>/dev/null || echo "  (none yet)"
-
-      # ── 18. Export IPA from .xcarchive (automatic signing) ────────────────
-      - name: Export IPA from .xcarchive
-        script: |
-          set -euo pipefail
-
-          if ls build/ios/ipa/*.ipa >/dev/null 2>&1; then
-            echo "✅ IPA already present — skipping export"
-            exit 0
-          fi
-
-          ARCHIVE="build/ios/archive/Runner.xcarchive"
-          EXPORT_DIR="build/ios/ipa"
-          EXPORT_PLIST="$EXPORT_DIR/ExportOptions.plist"
-          mkdir -p "$EXPORT_DIR"
-
-          # ✅ method is now "app-store-connect" (not deprecated "app-store")
-          # ✅ allowProvisioningUpdates lets Xcode resolve signing on the fly
-          /usr/libexec/PlistBuddy -c "Add :method                   string  app-store-connect" "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :teamID                    string  $APPLE_TEAM_ID"   "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :destination               string  export"           "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :signingStyle              string  automatic"        "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :allowProvisioningUpdates  bool    true"             "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :uploadSymbols             bool    true"             "$EXPORT_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :compileBitcode            bool    false"            "$EXPORT_PLIST"
-
-          echo "📝 ExportOptions.plist:"
-          cat "$EXPORT_PLIST"
-
-          xcodebuild \
-            -exportArchive \
-            -archivePath "$ARCHIVE" \
-            -exportOptionsPlist "$EXPORT_PLIST" \
-            -exportPath "$EXPORT_DIR" \
-            -allowProvisioningUpdates \
-            | xcpretty
-
-          ls -lh "$EXPORT_DIR"
-          echo "✅ IPA exported to $EXPORT_DIR"
+          echo "=== IPA ==="
+          ls -lh build/ios/ipa/*.ipa 2>/dev/null || echo "  (no IPA found)"
 
     # ── Artifacts ────────────────────────────────────────────────────────────
     artifacts:
