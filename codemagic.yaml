@@ -323,51 +323,87 @@ workflows:
           /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -A1 "NS.*Usage"
 
       # ── 14. Regenerate iOS app icons (no alpha channel) ───────────────────
-      - name: Regenerate iOS app icons (no alpha)
+      - name: Regenerate iOS app icons
         script: |
           set -e
+          ICON_SRC="assets/icons/ios/1024x1024.png"
+          ICONSET="ios/Runner/Assets.xcassets/AppIcon.appiconset"
 
-          # 0) Ensure source icon exists (1024x1024 opaque PNG)
-          test -f assets/icons/ios/1024x1024.png || { echo "❌ assets/icons/ios/1024x1024.png missing"; exit 1; }
+          [ -f "$ICON_SRC" ] \
+            || { echo "❌ $ICON_SRC missing — add a 1024×1024 opaque PNG"; exit 1; }
 
-          # 1) Ensure iOS icon dirs exist so generator doesn't choke
-          ICONSET_DIR="ios/Runner/Assets.xcassets/AppIcon.appiconset"
-          mkdir -p "$ICONSET_DIR"
-          [ -f "$ICONSET_DIR/Contents.json" ] || cat > "$ICONSET_DIR/Contents.json" <<'JSON'
+          mkdir -p "$ICONSET"
+          [ -f "$ICONSET/Contents.json" ] || cat > "$ICONSET/Contents.json" <<'JSON'
           {
-            "images" : [],
-            "info" : { "version" : 1, "author" : "xcode" }
+            "images": [],
+            "info": { "version": 1, "author": "xcode" }
           }
           JSON
 
-              # 2) Run generator ONLY for iOS to avoid the "No platform provided" warning
-              #    (and ignore any non-zero due to benign warnings)
-              dart run flutter_launcher_icons -p ios || true
-              echo "✓ Successfully generated launcher icons (iOS)"
+          # Generate iOS icons only
+          dart run flutter_launcher_icons -p ios
+          echo "✅ Icons generated"
 
-              # 3) Verify ios-marketing entry exists
-              if ! grep -q '"idiom" *: *"ios-marketing"' "$ICONSET_DIR/Contents.json"; then
-                echo "❌ ios-marketing (1024x1024) icon not listed"; exit 1
-              fi
+          # Confirm ios-marketing (1024×1024) entry — Apple requires it
+          grep -q '"idiom".*"ios-marketing"' "$ICONSET/Contents.json" \
+            || { echo "❌ ios-marketing (1024×1024) entry missing in Contents.json"; exit 1; }
 
-              # 4) Ensure no alpha in any generated PNGs
-              if command -v sips >/dev/null 2>&1; then
-                bad=0
-                for p in "$ICONSET_DIR"/*.png; do
-                  [ -f "$p" ] || continue
-                  has_alpha=$(sips -g hasAlpha "$p" 2>/dev/null | awk '/hasAlpha:/ {print $2}')
-                  if [ "$has_alpha" = "yes" ]; then
-                    echo "❌ $p has alpha"
-                    bad=1
-                  fi
-                done
-                [ "$bad" -eq 0 ] && echo "✅ All iOS icons are opaque (no alpha)" || { echo "❌ Alpha detected"; exit 1; }
-              else
-                echo "ℹ️ 'sips' not available; skipping alpha check"
-              fi
+          # Verify no alpha channel — Apple rejects transparent icons
+          BAD=0
+          for p in "$ICONSET"/*.png; do
+            [ -f "$p" ] || continue
+            ALPHA=$(sips -g hasAlpha "$p" 2>/dev/null | awk '/hasAlpha:/ {print $2}')
+            [ "$ALPHA" = "yes" ] && { echo "❌ Alpha detected: $p"; BAD=1; }
+          done
+          [ "$BAD" -eq 0 ] \
+            && echo "✅ All icons are opaque (no alpha)" \
+            || { echo "❌ Remove alpha from icon source and rebuild"; exit 1; }
 
-              # 5) Force success for this step if we reach here
-              exit 0
+      # - name: Regenerate iOS app icons (no alpha)
+      #   script: |
+      #     set -e
+
+      #     # 0) Ensure source icon exists (1024x1024 opaque PNG)
+      #     test -f assets/icons/ios/1024x1024.png || { echo "❌ assets/icons/ios/1024x1024.png missing"; exit 1; }
+
+      #     # 1) Ensure iOS icon dirs exist so generator doesn't choke
+      #     ICONSET_DIR="ios/Runner/Assets.xcassets/AppIcon.appiconset"
+      #     mkdir -p "$ICONSET_DIR"
+      #     [ -f "$ICONSET_DIR/Contents.json" ] || cat > "$ICONSET_DIR/Contents.json" <<'JSON'
+      #     {
+      #       "images" : [],
+      #       "info" : { "version" : 1, "author" : "xcode" }
+      #     }
+      #     JSON
+
+      #         # 2) Run generator ONLY for iOS to avoid the "No platform provided" warning
+      #         #    (and ignore any non-zero due to benign warnings)
+      #         dart run flutter_launcher_icons -p ios || true
+      #         echo "✓ Successfully generated launcher icons (iOS)"
+
+      #         # 3) Verify ios-marketing entry exists
+      #         if ! grep -q '"idiom" *: *"ios-marketing"' "$ICONSET_DIR/Contents.json"; then
+      #           echo "❌ ios-marketing (1024x1024) icon not listed"; exit 1
+      #         fi
+
+      #         # 4) Ensure no alpha in any generated PNGs
+      #         if command -v sips >/dev/null 2>&1; then
+      #           bad=0
+      #           for p in "$ICONSET_DIR"/*.png; do
+      #             [ -f "$p" ] || continue
+      #             has_alpha=$(sips -g hasAlpha "$p" 2>/dev/null | awk '/hasAlpha:/ {print $2}')
+      #             if [ "$has_alpha" = "yes" ]; then
+      #               echo "❌ $p has alpha"
+      #               bad=1
+      #             fi
+      #           done
+      #           [ "$bad" -eq 0 ] && echo "✅ All iOS icons are opaque (no alpha)" || { echo "❌ Alpha detected"; exit 1; }
+      #         else
+      #           echo "ℹ️ 'sips' not available; skipping alpha check"
+      #         fi
+
+      #         # 5) Force success for this step if we reach here
+      #         exit 0
 
 
 
