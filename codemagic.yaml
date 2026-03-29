@@ -12,10 +12,6 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.smashrite.core.ios
-        api_key:
-          key_id: $APP_STORE_CONNECT_KEY_ID
-          issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-          private_key: $APP_STORE_CONNECT_PRIVATE_KEY
       vars:
         BUNDLE_ID: "com.smashrite.core.ios"
         APPLE_TEAM_ID: "6N74MV2D96"
