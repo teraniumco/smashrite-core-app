@@ -594,7 +594,7 @@ class SecurityService {
         onPrivilegedAccess: () => _handleThreat('privilegedAccess'),
         onSecureHardwareNotAvailable: () => _handleThreat('secureHardwareNotAvailable'),
         onSimulator: () => _handleThreat('simulator'),
-        onUnofficialStore: () => _handleThreat('unofficialStore'),
+        // onUnofficialStore: () => _handleThreat('unofficialStore'),
         onDevMode: () => _handleThreat('devMode'),
         onSystemVPN: () => _handleThreat('systemVPN'),
         onTimeSpoofing: () => _handleThreat('timeSpoofing'),
