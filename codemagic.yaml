@@ -28,12 +28,12 @@ workflows:
     #   IOS_P12_PASSWORD              → Any strong password e.g. "Smashrite@2026!"
     # ---------------------------------------------------------------------------
 
-    # triggering:
-    #   events:
-    #     - push
-    #   branch_patterns:
-    #     - pattern: main
-    #       include: true
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
 
     scripts:
 
