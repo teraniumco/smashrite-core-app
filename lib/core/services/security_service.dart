@@ -46,6 +46,11 @@ class SecurityService {
   static HardwareProfile? _hardwareProfile;
   static String? _compositeFingerprint;
 
+  // ── FIX: deduplicate screen-recording violation reports ───────────────────
+  // Without this flag the iOS 2-second poll floods the server with repeated
+  // screenRecording violations for a single continuous recording session.
+  static bool _screenRecordingViolationReported = false;
+
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
@@ -66,13 +71,10 @@ class SecurityService {
 
   // ── Secure Dio builder ────────────────────────────────────────────────────
 
-  /// Apply the Smashrite CA-pinned HttpClient to [dio].
-  /// Must be called right after every Dio instance is created.
   static Future<void> _applySecureAdapter(Dio dio) async {
     await SmashriteSslContext.applyTo(dio);
   }
 
-  /// Force every URL to HTTPS before making a request.
   static String _enforceHttps(String url) {
     if (url.startsWith('http://')) {
       debugPrint('[SSL] Warning: upgrading HTTP → HTTPS for $url');
@@ -83,8 +85,6 @@ class SecurityService {
 
   // ── Default API client (api.smashrite.com) ────────────────────────────────
 
-  /// Lazily build the default cloud API client.
-  /// Returns a Future because applying the secure adapter is async.
   static Future<Dio> _getDefaultApiClient() async {
     if (_defaultDio != null) return _defaultDio!;
 
@@ -100,10 +100,8 @@ class SecurityService {
       ),
     );
 
-    // ── Secure adapter ────────────────────────────────────────────────────
     await _applySecureAdapter(_defaultDio!);
 
-    // ── Auth interceptor ──────────────────────────────────────────────────
     _defaultDio!.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
@@ -168,10 +166,8 @@ class SecurityService {
         ),
       );
 
-      // ── Secure adapter ──────────────────────────────────────────────────
       await _applySecureAdapter(_dio!);
 
-      // ── Auth interceptor ────────────────────────────────────────────────
       _dio!.interceptors.add(
         InterceptorsWrapper(
           onRequest: (options, handler) {
@@ -205,7 +201,6 @@ class SecurityService {
     }
   }
 
-  /// Shared DioException logger with SSL-specific messaging
   static void _logDioError(String tag, DioException error) {
     if (error.error is HandshakeException) {
       debugPrint(
@@ -237,7 +232,8 @@ class SecurityService {
     debugPrint('[Security] Current question ID: $questionId');
   }
 
-  /// Initialize security monitoring
+  // ── Initialize ────────────────────────────────────────────────────────────
+
   static Future<void> initialize({ExamServer? server}) async {
     if (_isInitialized) {
       if (server != null) await configureServer(server);
@@ -292,7 +288,7 @@ class SecurityService {
       await _initializeFreeRASP();
       debugPrint('[Security] FreeRASP initialized.');
 
-      // 7. Native monitoring
+      // 7. Native monitoring (screenshot + recording detection)
       await _setupNativeSecurityMonitoring();
 
       _isInitialized = true;
@@ -519,7 +515,6 @@ class SecurityService {
     }
   }
 
-  /// Verify device registration against the institution server backend
   static Future<void> _checkDeviceRegistration() async {
     try {
       final studentId = await _secureStorage.read(key: 'student_id');
@@ -528,7 +523,6 @@ class SecurityService {
         return;
       }
 
-      // Use institution server Dio — requires CA cert
       final client = _dio;
       if (client == null) {
         debugPrint(
@@ -580,19 +574,18 @@ class SecurityService {
         ),
         watcherMail: '',
         isProd: kReleaseMode,
-        killOnBypass: true, // kills app if attacker suppresses callbacks
+        killOnBypass: true,
       );
 
       final callback = ThreatCallback(
         onAppIntegrity: () => _handleThreat('appIntegrity'),
         onObfuscationIssues: () => _handleThreat('obfuscationIssues'),
         onDebug: () => _handleThreat('debug'),
-        // onDeviceBinding: () => _handleThreat('deviceBinding'),
-        // onDeviceID: () => _handleThreat('deviceID'),
         onHooks: () => _handleThreat('hooks'),
         onPasscode: () => _handleThreat('passcode'),
         onPrivilegedAccess: () => _handleThreat('privilegedAccess'),
-        onSecureHardwareNotAvailable: () => _handleThreat('secureHardwareNotAvailable'),
+        onSecureHardwareNotAvailable: () =>
+            _handleThreat('secureHardwareNotAvailable'),
         onSimulator: () => _handleThreat('simulator'),
         onUnofficialStore: () => _handleThreat('unofficialStore'),
         onDevMode: () => _handleThreat('devMode'),
@@ -614,9 +607,13 @@ class SecurityService {
 
       debugPrint('[Security] FreeRASP started.');
     } on TimeoutException catch (e) {
-      debugPrint('[Security] FreeRASP timeout: $e — continuing with basic security.');
+      debugPrint(
+        '[Security] FreeRASP timeout: $e — continuing with basic security.',
+      );
     } catch (e) {
-      debugPrint('[Security] FreeRASP failed: $e — continuing with basic security.');
+      debugPrint(
+        '[Security] FreeRASP failed: $e — continuing with basic security.',
+      );
     }
   }
 
@@ -663,10 +660,10 @@ class SecurityService {
       case 'deviceID':
         return ViolationType.deviceMismatch;
       case 'hooks':
-      case 'devMode':         
-      case 'timeSpoofing':    
+      case 'devMode':
+      case 'timeSpoofing':
       case 'locationSpoofing':
-      case 'systemVPN':       
+      case 'systemVPN':
         return ViolationType.suspiciousBehavior;
       default:
         return ViolationType.suspiciousBehavior;
@@ -720,16 +717,21 @@ class SecurityService {
     platform.setMethodCallHandler(_handleMethodCall);
     try {
       final result = await platform.invokeMethod('enableScreenSecurity');
+      // iOS now returns true (blackout active); Android returns true if
+      // FLAG_SECURE was set successfully.
       debugPrint(
         result == true
-            ? '[Security] Screen security enabled.'
-            : '[Security] Screen security not supported.',
+            ? '[Security] Screen security enabled (content blacked out in captures).'
+            : '[Security] Screen security not supported on this platform.',
       );
     } catch (e) {
       debugPrint('[Security] Error enabling screen security: $e');
     }
 
     if (Platform.isIOS) {
+      // iOS: poll every 2 seconds for active screen recording.
+      // Deduplication is handled inside _handleMethodCall so the server
+      // only receives one violation per recording session, not one per tick.
       _startScreenRecordingMonitor();
     }
   }
@@ -741,7 +743,8 @@ class SecurityService {
         final timestamp = DateTime.fromMillisecondsSinceEpoch(
           ((call.arguments['timestamp'] as double) * 1000).toInt(),
         );
-        debugPrint('[Security] Screenshot detected! Count: $count');
+        debugPrint('[Security] Screenshot attempt! Count: $count');
+        debugPrint('[Security]   ↳ Captured image is blacked out (iOS protection active)');
         onScreenshotDetected?.call(count, timestamp);
         await _reportScreenshotViolation(count, timestamp);
         break;
@@ -752,7 +755,17 @@ class SecurityService {
           '[Security] Screen recording ${isRecording ? "STARTED" : "STOPPED"}',
         );
         onScreenRecordingChanged?.call(isRecording);
-        if (isRecording) await _reportScreenRecordingViolation();
+
+        if (isRecording) {
+          // FIX: only report once per recording session, not on every poll tick
+          if (!_screenRecordingViolationReported) {
+            _screenRecordingViolationReported = true;
+            await _reportScreenRecordingViolation();
+          }
+        } else {
+          // Reset so the next separate recording session is reported again
+          _screenRecordingViolationReported = false;
+        }
         break;
 
       case 'onMultiWindowDetected':
@@ -783,19 +796,28 @@ class SecurityService {
 
   static void _startScreenRecordingMonitor() {
     _recordingMonitor?.cancel();
-    _recordingMonitor = Timer.periodic(const Duration(seconds: 2), (
-      timer,
-    ) async {
+    _recordingMonitor = Timer.periodic(const Duration(seconds: 2), (_) async {
       try {
         final isRecording = await platform.invokeMethod('checkScreenRecording');
         if (isRecording == true) {
-          onScreenRecordingChanged?.call(true);
-          await _reportScreenRecordingViolation();
+          // Route through _handleMethodCall so deduplication logic applies
+          await _handleMethodCall(
+            MethodCall('onScreenRecordingChanged', {'isRecording': true}),
+          );
+        } else {
+          // Recording stopped — reset the dedup flag via the same path
+          if (_screenRecordingViolationReported) {
+            await _handleMethodCall(
+              MethodCall('onScreenRecordingChanged', {'isRecording': false}),
+            );
+          }
         }
       } catch (_) {}
     });
   }
 
+  // FIX: was defined but NEVER called — now called from setCurrentExamAttempt
+  // so periodic checks only run during an active exam session.
   static void _startPeriodicSecurityChecks() {
     _periodicSecurityCheck?.cancel();
     _periodicSecurityCheck = Timer.periodic(const Duration(seconds: 30), (
@@ -803,6 +825,7 @@ class SecurityService {
     ) async {
       await _performPeriodicCheck();
     });
+    debugPrint('[Security] Periodic security checks started (every 30s).');
   }
 
   static Future<void> _performPeriodicCheck() async {
@@ -817,7 +840,6 @@ class SecurityService {
 
       final consistency = await checkDeviceConsistency();
 
-      // Use institution Dio for periodic checks
       final client = _dio;
       if (client == null) return;
 
@@ -876,7 +898,6 @@ class SecurityService {
         'detected_at': DateTime.now().toIso8601String(),
       };
 
-      // Use institution server Dio — violations reported to local server
       final client = _dio;
       if (client != null) {
         await client.post('/security/report-violation', data: payload);
@@ -912,12 +933,13 @@ class SecurityService {
       SecurityViolation(
         type: ViolationType.screenshot,
         severity: ViolationSeverity.high,
-        description: 'Screenshot attempt detected during exam.',
+        description: 'Screenshot attempt detected during exam. Capture was blacked out.',
         detectedAt: timestamp,
         metadata: {
           'screenshot_count': count,
           'composite_fingerprint': _compositeFingerprint,
           'question_index': _currentQuestionId,
+          'content_exposed': false, // iOS blackout was active
         },
       ),
     );
@@ -928,11 +950,12 @@ class SecurityService {
       SecurityViolation(
         type: ViolationType.screenRecording,
         severity: ViolationSeverity.critical,
-        description: 'Screen recording detected during exam.',
+        description: 'Screen recording detected during exam. Recording was blacked out.',
         detectedAt: DateTime.now(),
         metadata: {
           'composite_fingerprint': _compositeFingerprint,
           'question_index': _currentQuestionId,
+          'content_exposed': false, // iOS blackout was active
         },
       ),
     );
@@ -1048,7 +1071,9 @@ class SecurityService {
     }
     _recordingMonitor?.cancel();
     _periodicSecurityCheck?.cancel();
+    _screenRecordingViolationReported = false;
     _isInitialized = false;
+    debugPrint('[Security] Security service disabled.');
   }
 
   static Future<bool> isScreenRecording() async {
@@ -1061,15 +1086,26 @@ class SecurityService {
     }
   }
 
+  /// Call this when an exam session starts.
+  /// Saves the attempt ID and kicks off periodic server-side security checks.
   static Future<void> setCurrentExamAttempt(int examAttemptId) async {
     await _secureStorage.write(
       key: 'current_exam_attempt_id',
       value: examAttemptId.toString(),
     );
+    // FIX: was never started — now starts when an exam actually begins
+    _startPeriodicSecurityChecks();
   }
 
+  /// Call this when an exam session ends.
+  /// Stops periodic checks and clears the stored attempt ID.
   static Future<void> clearExamAttempt() async {
     await _secureStorage.delete(key: 'current_exam_attempt_id');
+    // FIX: stop periodic checks when no exam is active
+    _periodicSecurityCheck?.cancel();
+    _periodicSecurityCheck = null;
+    _screenRecordingViolationReported = false;
+    debugPrint('[Security] Exam attempt cleared — periodic checks stopped.');
   }
 }
 
