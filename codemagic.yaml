@@ -390,6 +390,16 @@ workflows:
           echo "✅ Info.plist permission strings set"
           /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -A1 "NS.*Usage" || true
 
+          # App display name — shown under icon on home screen
+          /usr/libexec/PlistBuddy -c \
+            "Add :CFBundleDisplayName string 'Smashrite Core'" \
+            "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c \
+            "Set :CFBundleDisplayName 'Smashrite Core'" \
+            "$PLIST"
+
+          echo "✅ App display name set to: Smashrite Core"
+
       # ── 21. Regenerate iOS app icons (no alpha) ──────────────────────────────
       - name: Regenerate iOS app icons
         script: |
