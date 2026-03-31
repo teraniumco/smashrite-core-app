@@ -162,7 +162,7 @@ flutter_launcher_icons:
   min_sdk_android: 21
   remove_alpha_ios: true
   
-  # Optional: Remove the default  Flutter icon background
+  # Optional: Remove the default Flutter icon background
   adaptive_icon_background: "#F4F4F7"
   adaptive_icon_foreground: "assets/images/icon-foreground.png"
 

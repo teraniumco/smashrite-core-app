@@ -409,7 +409,7 @@ workflows:
           JSON
 
           # Generate iOS icons — fail loudly on real errors
-          dart run flutter_launcher_icons -p ios
+          dart run flutter_launcher_icons ios
           echo "✅ Icons generated"
 
           # ios-marketing (1024×1024) is mandatory for App Store
