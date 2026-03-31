@@ -517,6 +517,8 @@ workflows:
           BUILD_FAILED=0
 
           flutter build ipa --release \
+            --obfuscate \
+            --split-debug-info=build/ios/symbols \
             --export-options-plist=build/ios/ipa/ExportOptions.plist \
             -v 2>&1 | tee "$LOG" || BUILD_FAILED=1
 
@@ -578,6 +580,7 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - build/ios/ipa/*.dSYM.zip
+      - build/ios/symbols/ 
       - build_ios_verbose.log      # retained on failure for diagnosis
 
     # ── Publishing ───────────────────────────────────────────────────────────
