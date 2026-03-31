@@ -575,7 +575,7 @@ class SecurityService {
           ],
         ),
         iosConfig: IOSConfig(
-          bundleIds: ['com.smashrite.core'],
+          bundleIds: ['com.smashrite.core.ios'],
           teamId: '6N74MV2D96',
         ),
         watcherMail: '',
