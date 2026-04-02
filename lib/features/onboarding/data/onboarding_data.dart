@@ -43,7 +43,7 @@ class OnboardingData {
     const OnboardingPage(
       title: 'Exam Rules Apply',
       description:
-          'Switching apps, screenshots, or screen recording may be detected during the exam. This leads to violations and possible auto-submission.',
+          'Switching apps, screenshots, or screen recording are not allowed. These leads to exam violations and prompt consequences.',
       icon: Icons.verified_user_rounded,
     ),
     OnboardingPage(
@@ -55,7 +55,7 @@ class OnboardingData {
           icon: Icons.battery_charging_full_rounded,
           title: 'Battery charged:',
           description:
-              'Please ensure your device is at least 80% charged to avoid interruptions.',
+              'Please ensure your device is at least 40% charged to avoid interruptions. 70% is recommended.',
         ),
         const ChecklistItem(
           icon: Icons.vpn_key_rounded,

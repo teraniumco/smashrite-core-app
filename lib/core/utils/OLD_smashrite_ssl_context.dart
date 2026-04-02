@@ -6,6 +6,11 @@ class SmashriteSslContext {
   SmashriteSslContext._();
 
   static SecurityContext? _context;
+  
+  // The expected issuer CN in all Smashrite CA-signed certs.
+  // Must match the O= or CN= field in your CA's subject.
+  static const String _caOrganization = 'Smashrite Technologies';
+  static const String _caCommonName = 'Smashrite Local CA';
 
   /// Returns a SecurityContext that trusts ONLY the Smashrite CA.
   /// Built once and cached.
@@ -39,12 +44,29 @@ class SmashriteSslContext {
       ) {
         // The SecurityContext already rejected certs from foreign CAs —
         // if we reach here, it means the cert IS from our CA but the
-        // hostname doesn't match Smashrite local domains.
+        // hostname doesn't match (because the app connected via raw IP).
+        //
+        // Double-check the cert issuer to be safe before allowing.
+        final isSmashriteCert = cert.issuer.contains(_caCommonName);
+
+        debugPrint(
+            '[SSL] Double-checked the cert issuer to be safe before allowing.'
+            'Host: $host:$port | Issuer: ${cert.issuer} | isSmashriteCert: $isSmashriteCert',
+          );
+
+        if (isSmashriteCert) {
+          debugPrint(
+            '[SSL] Hostname mismatch allowed — cert is Smashrite-issued. '
+            'Host: $host:$port | Issuer: ${cert.issuer}',
+          );
+          return true; // ✅ Dynamic IP, same CA — allow
+        }
+
         debugPrint(
           '[SSL] REJECTED — cert issuer is not Smashrite CA. '
           'Host: $host:$port | Issuer: ${cert.issuer}',
         );
-        return false; // ❌ wrong local Smashrite domain — reject
+        return false; // ❌ Foreign cert — reject
       };
 
       return client;

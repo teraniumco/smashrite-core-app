@@ -581,6 +581,8 @@ class SecurityService {
         onAppIntegrity: () => _handleThreat('appIntegrity'),
         onObfuscationIssues: () => _handleThreat('obfuscationIssues'),
         onDebug: () => _handleThreat('debug'),
+        // onDeviceBinding: () => _handleThreat('deviceBinding'),
+        // onDeviceID: () => _handleThreat('deviceID'),
         onHooks: () => _handleThreat('hooks'),
         onPasscode: () => _handleThreat('passcode'),
         onPrivilegedAccess: () => _handleThreat('privilegedAccess'),
