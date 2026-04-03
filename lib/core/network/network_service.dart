@@ -71,33 +71,16 @@ class NetworkService {
     }
   }
 
-  /// Check if IP address is a local/private IP
-  static bool isLocalIP(String ip) {
-    try {
-      final parts = ip.split('.');
-      if (parts.length != 4) return false;
+  /// Check if domain is a local Smashrite server (smashrite-server-1.local to smashrite-server-20.local)
+  static bool isLocalDomain(String domain) {
+    final regex = RegExp(r'^smashrite-server-(\d{1,2})\.local$');
+    final match = regex.firstMatch(domain);
+    if (match == null) return false;
 
-      final first = int.parse(parts[0]);
-      final second = int.parse(parts[1]);
+    final number = int.tryParse(match.group(1) ?? '');
+    if (number == null) return false;
 
-      // Check for private IP ranges
-      // 10.0.0.0 - 10.255.255.255
-      if (first == 10) return true;
-
-      // 172.16.0.0 - 172.31.255.255
-      if (first == 172 && second >= 16 && second <= 31) return true;
-
-      // 192.168.0.0 - 192.168.255.255
-      if (first == 192 && second == 168) return true;
-
-      // 127.0.0.0 - 127.255.255.255 (localhost)
-      if (first == 127) return true;
-
-      return false;
-    } catch (e) {
-      debugPrint('Error validating local IP: $e');
-      return false;
-    }
+    return number >= 1 && number <= 20;
   }
 
   /// Validate network status for exam connection

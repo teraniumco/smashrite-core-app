@@ -54,7 +54,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
         return;
       }
 
-      final ipAddress = parts[0];
+      final smashriteDomain = parts[0];
       final port = int.tryParse(parts[1]);
       final serverName =
           parts.length > 2 && parts[2].isNotEmpty
@@ -67,14 +67,14 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
       }
 
       // Validate IP is local
-      if (!NetworkService.isLocalIP(ipAddress)) {
-        _showErrorDialog('QR code must contain a local IP address');
+      if (!NetworkService.isLocalDomain(smashriteDomain)) {
+        _showErrorDialog('QR code must contain a valid smashrite local domain');
         return;
       }
 
       final server = ExamServer(
         name: serverName,
-        ipAddress: ipAddress,
+        smashriteDomain: smashriteDomain,
         port: port,
       );
 
@@ -105,12 +105,12 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                     width: 56,
                     height: 56,
                     decoration: BoxDecoration(
-                      color: AppColors.warning.withOpacity(0.1),
+                      color: AppColors.success.withOpacity(0.1),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      Icons.info_outline,
-                      color: AppColors.warning,
+                      Icons.check,
+                      color: AppColors.success,
                       size: 32,
                     ),
                   ),
@@ -118,14 +118,14 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
 
                   // Title
                   Text(
-                    'QR Code Scanned',
+                    'Server Found',
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
                   const SizedBox(height: 8),
 
                   // Server info
                   Text(
-                    'Server: ${server.name} via ${server.ipAddress}:${server.port}\nProceed to login?',
+                    '${server.name} via https://${server.smashriteDomain} \nProceed to connect.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: AppColors.textPrimary,

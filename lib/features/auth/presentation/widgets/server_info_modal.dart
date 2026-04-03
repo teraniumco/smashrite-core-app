@@ -59,7 +59,7 @@ class ServerInfoModal extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Connected Server',
+                        'Exam Server',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: AppColors.textSecondary,
                             ),
@@ -115,19 +115,19 @@ class ServerInfoModal extends StatelessWidget {
             // Server Details
             _InfoRow(
               icon: Icons.language_rounded,
-              label: 'IP Address',
-              value: server.ipAddress,
-              onCopy: () => _copyToClipboard(context, server.ipAddress, 'IP Address'),
+              label: 'Server Domain',
+              value: server.smashriteDomain,
+              onCopy: () => _copyToClipboard(context, server.smashriteDomain, 'Server Domain'),
             ),
             const SizedBox(height: 16),
 
-            _InfoRow(
-              icon: Icons.cable_rounded,
-              label: 'Port',
-              value: server.port.toString(),
-              onCopy: () => _copyToClipboard(context, server.port.toString(), 'Port'),
-            ),
-            const SizedBox(height: 16),
+            // _InfoRow(
+            //   icon: Icons.cable_rounded,
+            //   label: 'Port',
+            //   value: server.port.toString(),
+            //   onCopy: () => _copyToClipboard(context, server.port.toString(), 'Port'),
+            // ),
+            // const SizedBox(height: 16),
 
             if (server.signalStrength != null) ...[
               const SizedBox(height: 16),

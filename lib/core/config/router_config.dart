@@ -9,8 +9,6 @@ import 'package:smashrite/features/splash/presentation/splash_screen.dart';
 import 'package:smashrite/features/onboarding/presentation/onboarding_screen.dart';
 import 'package:smashrite/features/server_connection/presentation/server_connection_screen.dart';
 import 'package:smashrite/features/server_connection/presentation/qr_scanner_screen.dart';
-import 'package:smashrite/features/server_connection/presentation/auto_discover_screen.dart';
-import 'package:smashrite/features/server_connection/presentation/manual_entry_screen.dart';
 import 'package:smashrite/features/auth/presentation/login_screen.dart';
 import 'package:smashrite/features/exam/presentation/exam_lobby_screen.dart';
 import 'package:smashrite/features/security/presentation/security_violation_screen.dart';
@@ -144,51 +142,6 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
-      // Auto-Discover Screen
-      GoRoute(
-        path: '/server-connection/auto-discover',
-        name: 'auto-discover',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const AutoDiscoverScreen(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            const begin = Offset(1.0, 0.0);
-            const end = Offset.zero;
-            const curve = Curves.easeInOut;
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
-            var offsetAnimation = animation.drive(tween);
-            return SlideTransition(
-              position: offsetAnimation,
-              child: child,
-            );
-          },
-        ),
-      ),
-
-      // Manual Entry Screen
-      GoRoute(
-        path: '/server-connection/manual-entry',
-        name: 'manual-entry',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const ManualEntryScreen(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            const begin = Offset(1.0, 0.0);
-            const end = Offset.zero;
-            const curve = Curves.easeInOut;
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
-            var offsetAnimation = animation.drive(tween);
-            return SlideTransition(
-              position: offsetAnimation,
-              child: child,
-            );
-          },
-        ),
-      ),
 
       GoRoute(
         path: '/security-violation',

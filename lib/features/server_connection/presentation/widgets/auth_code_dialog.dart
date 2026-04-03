@@ -133,7 +133,7 @@ class _AuthCodeDialogState extends State<AuthCodeDialog> {
 
                 // Server info
                 Text(
-                  'Server: ${widget.server.name} via ${widget.server.ipAddress}:${widget.server.port}',
+                  '${widget.server.name} via https://${widget.server.smashriteDomain}',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppColors.textPrimary,

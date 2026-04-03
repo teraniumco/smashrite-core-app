@@ -3,7 +3,7 @@ import 'package:equatable/equatable.dart';
 /// Represents an exam server
 class ExamServer extends Equatable {
   final String name;
-  final String ipAddress;
+  final String smashriteDomain;
   final int port;
   final int? signalStrength; // For auto-discovered servers
   final String? authCode; // 6-digit authentication code
@@ -15,7 +15,7 @@ class ExamServer extends Equatable {
 
   const ExamServer({
     required this.name,
-    required this.ipAddress,
+    required this.smashriteDomain,
     required this.port,
     this.signalStrength,
     this.authCode,
@@ -25,15 +25,15 @@ class ExamServer extends Equatable {
   });
 
   /// Full server URL
-  String get url => 'https://$ipAddress/api/v1';
+  String get url => 'https://$smashriteDomain/api/v1';
 
   /// Server display name with IP
-  String get displayInfo => '$name ($ipAddress)';
+  String get displayInfo => '$name ($smashriteDomain)';
 
   /// Copy with method
   ExamServer copyWith({
     String? name,
-    String? ipAddress,
+    String? smashriteDomain,
     int? port,
     int? signalStrength,
     String? authCode,
@@ -43,7 +43,7 @@ class ExamServer extends Equatable {
   }) {
     return ExamServer(
       name: name ?? this.name,
-      ipAddress: ipAddress ?? this.ipAddress,
+      smashriteDomain: smashriteDomain ?? this.smashriteDomain,
       port: port ?? this.port,
       signalStrength: signalStrength ?? this.signalStrength,
       authCode: authCode ?? this.authCode,
@@ -57,7 +57,7 @@ class ExamServer extends Equatable {
   Map<String, dynamic> toJson() {
     return {
       'name': name,
-      'ipAddress': ipAddress,
+      'smashriteDomain': smashriteDomain,
       'port': port,
       'signalStrength': signalStrength,
       'authCode': authCode,
@@ -71,7 +71,7 @@ class ExamServer extends Equatable {
   factory ExamServer.fromJson(Map<String, dynamic> json) {
     return ExamServer(
       name: json['name'] as String,
-      ipAddress: json['ipAddress'] as String,
+      smashriteDomain: json['smashriteDomain'] as String,
       port: json['port'] as int,
       signalStrength: json['signalStrength'] as int?,
       authCode: json['authCode'] as String?,
@@ -84,7 +84,7 @@ class ExamServer extends Equatable {
   @override
   List<Object?> get props => [
         name,
-        ipAddress,
+        smashriteDomain,
         port,
         signalStrength,
         authCode,
