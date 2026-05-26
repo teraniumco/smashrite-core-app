@@ -1389,14 +1389,14 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: const [
-                Icon(Icons.swipe_left, size: 20, color: Colors.grey),
+                Icon(Icons.swipe_left, size: 20, color: Color(0xFFFF7A00)),
                 SizedBox(width: 6),
                 Text(
                   'Swipe to navigate',
-                  style: TextStyle(fontSize: 15, color: AppColors.textPrimary),
+                  style: TextStyle(fontSize: 15, color: Color(0xFFFF7A00), fontWeight: FontWeight.w700),
                 ),
                 SizedBox(width: 6),
-                Icon(Icons.swipe_right, size: 20, color: Colors.grey),
+                Icon(Icons.swipe_right, size: 20, color: Color(0xFFFF7A00)),
               ],
             ),
           ),
@@ -1650,7 +1650,7 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
               border: Border.all(color: Color(0xFFFF7A00)),
             ),
             child: const Text(
-              "SKIP & DONT'T SHOW AGAIN",
+              "SKIP & DON'T SHOW AGAIN",
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w600,
