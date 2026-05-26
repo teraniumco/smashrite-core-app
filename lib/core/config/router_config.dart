@@ -15,6 +15,7 @@ import 'package:smashrite/features/security/presentation/security_violation_scre
 import 'package:smashrite/features/security/presentation/device_mismatch_screen.dart';
 import 'package:smashrite/core/services/security_service.dart';
 import 'package:smashrite/features/app_version/presentation/screens/app_version_check_screen.dart';
+import 'package:smashrite/features/wifi_connect/presentation/wifi_connect_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -169,6 +170,18 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/pre-flight-check',
         builder: (context, state) => const PreFlightCheckScreen(),
+      ),
+
+      GoRoute(
+        path: '/wifi-connect',
+        name: 'wifi-connect',
+        pageBuilder: (context, state) => CustomTransitionPage(
+          key: state.pageKey,
+          child: const WifiConnectScreen(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
       ),
 
       GoRoute(

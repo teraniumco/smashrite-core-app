@@ -10,6 +10,7 @@ class AppConstants {
   static const String apiKey = 'api_key';
   static const String examViolationStatus = 'exam_violation_status';
   static const String examViolationDetails = 'exam_violation_details';
+  static const String hasSeenExamTour = 'has_seen_exam_tour';
 
   // Student Info
   static const String studentId = 'student_id';

@@ -129,6 +129,10 @@ class MainActivity: FlutterActivity() {
                     try { openStorageSettings(); result.success(true) }
                     catch (e: Exception) { result.error("SETTINGS_ERROR", e.message, null) }
                 }
+                "openMobileDataSettings" -> {
+                    try { openMobileDataSettings(); result.success(true) }
+                    catch (e: Exception) { result.error("SETTINGS_ERROR", e.message, null) }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -218,6 +222,27 @@ class MainActivity: FlutterActivity() {
         if (intent.resolveActivity(packageManager) != null) startActivity(intent)
         else openFallbackSettings()
     }
+
+    private fun openMobileDataSettings() {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)
+        } else {
+            Intent(Settings.ACTION_WIRELESS_SETTINGS)
+        }.apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_NO_HISTORY or
+                Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+            )
+        }
+
+        if (intent.resolveActivity(packageManager) != null) {
+            startActivity(intent)
+        } else {
+            openFallbackSettings()
+        }
+    }
+
 
     private fun openStorageSettings() {
         val action = when {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:smashrite/core/constants/app_constants.dart';
+import 'package:smashrite/core/storage/storage_service.dart';
 import 'package:smashrite/core/theme/app_theme.dart';
 import 'package:smashrite/features/server_connection/data/models/exam_server.dart';
 import 'package:smashrite/features/server_connection/presentation/widgets/auth_code_dialog.dart';
@@ -174,7 +176,8 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
       builder:
           (context) => AuthCodeDialog(
             server: server,
-            onSuccess: () {
+            onSuccess: () async {
+              await StorageService.save(AppConstants.isFirstLaunch, false);
               context.go('/login');
             },
           ),

@@ -48,12 +48,23 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       await StorageService.init();
       await Future.delayed(AppConstants.splashDuration);
       if (!mounted) return;
+
+      final isFirstLaunch = StorageService.get<bool>(
+        AppConstants.isFirstLaunch,
+        defaultValue: true,
+      );
+
+      if (isFirstLaunch == true) {
+        // Go to onboarding screen
+        context.go('/onboarding');
+        return;
+      }
       
-      // Go to pre-flight check (it handles navigation)
-      context.go('/pre-flight-check');
+      // Default: Go to network check screen
+      context.go('/wifi-connect');
     } catch (e) {
       debugPrint('Error: $e');
-      if (mounted) context.go('/pre-flight-check');
+      if (mounted) context.go('/onboarding');
     }
   }
 

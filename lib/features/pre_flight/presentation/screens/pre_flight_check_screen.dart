@@ -111,7 +111,7 @@ class _PreFlightCheckScreenState extends State<PreFlightCheckScreen>
     final isAuthenticated = accessToken != null && accessToken.isNotEmpty;
 
     if (isFirstLaunch == true || !hasConnectedToServer!) {
-      context.go('/onboarding');
+      context.go('/server-connection');
     } else if (!isAuthenticated) {
       context.go('/login');
     } else {

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:smashrite/core/theme/app_theme.dart';
 import 'package:smashrite/features/exam/data/models/student.dart';
 
 class StudentInfoModal extends StatelessWidget {
@@ -12,126 +11,178 @@ class StudentInfoModal extends StatelessWidget {
     required this.onLogout,
   });
 
+  static const _deepBlue = Color(0xFF0F2B6D);
+  static const _orange   = Color(0xFFFF7A00);
+
+  String _initials(String fullName) {
+    final parts = fullName.trim().split(RegExp(r'\s+'));
+    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    return parts.isNotEmpty ? parts[0][0].toUpperCase() : '?';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
+        color: Color(0xFFF3F5F9),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      padding: const EdgeInsets.all(24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle bar
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.textTertiary,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Avatar
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.person,
-              size: 48,
-              color: AppColors.primary,
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Full Name
-          Text(
-            student.fullName,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-
-          // Student ID
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.primaryLight.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: AppColors.primary.withOpacity(0.3),
+          // ── Handle ────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.badge_outlined,
-                  size: 18,
-                  color: AppColors.primary,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  student.studentId,
-                  style: TextStyle(
-                    color: AppColors.primary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
+          ),
+
+
+          // ── Title header ──────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _deepBlue.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.person_rounded,
+                      color: _deepBlue,
+                      size: 20,
+                    ),
                   ),
+                  const SizedBox(width: 10),
+                  const Text(
+                    'Student Info',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: _deepBlue,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+    
+          // ── Info rows ─────────────────────────────────────────────
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.04),
+                  blurRadius: 8, offset: const Offset(0, 2)),
+              ],
+            ),
+            child: Column(
+              children: [
+                _infoRow(
+                  icon: Icons.person_outline_rounded,
+                  label: 'Full Name',
+                  value: student.fullName,
+                  isFirst: true,
+                ),
+                Divider(height: 1, indent: 52, color: Colors.grey.shade100),
+                _infoRow(
+                  icon: Icons.badge_outlined,
+                  label: 'Student ID',
+                  value: student.studentId,
+                  isLast: true,
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 32),
 
-          // Divider
-          Divider(color: AppColors.border),
-          const SizedBox(height: 16),
-
-          // Logout Button
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: onLogout,
-              icon: const Icon(Icons.logout),
-              label: const Text('Logout'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.error,
-                side: BorderSide(color: AppColors.error),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+          // ── Logout button ─────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onLogout,
+                icon: const Icon(Icons.logout_rounded, size: 18),
+                label: const Text('Logout'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red.shade600,
+                  side: BorderSide(color: Colors.red.shade300, width: 1.5),
+                  backgroundColor: Colors.red.shade50,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 8),
 
-          // Cancel Button
-          // SizedBox(
-          //   width: double.infinity,
-          //   child: TextButton(
-          //     onPressed: () => Navigator.pop(context),
-          //     style: TextButton.styleFrom(
-          //       foregroundColor: AppColors.textSecondary,
-          //       padding: const EdgeInsets.symmetric(vertical: 16),
-          //     ),
-          //     child: const Text('Cancel'),
-          //   ),
-          // ),
+          // ── Safe area bottom padding ──────────────────────────────
+          SafeArea(
+            top: false,
+            child: const SizedBox(height: 16),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    bool isFirst = false,
+    bool isLast  = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 34, height: 34,
+            decoration: BoxDecoration(
+              color: _deepBlue.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 17, color: _deepBlue),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey.shade500,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                  )),
+                const SizedBox(height: 1),
+                Text(value,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1A1A2E),
+                  )),
+              ],
+            ),
+          ),
         ],
       ),
     );

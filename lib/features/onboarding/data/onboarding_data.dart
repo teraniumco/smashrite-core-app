@@ -2,72 +2,41 @@ import 'package:flutter/material.dart';
 
 class OnboardingPage {
   final String title;
-  final String description;
+  final String body;
   final IconData icon;
-  final List<ChecklistItem>? checklist;
 
   const OnboardingPage({
     required this.title,
-    required this.description,
+    required this.body,
     required this.icon,
-    this.checklist,
-  });
-}
-
-class ChecklistItem {
-  final IconData icon;
-  final String title;
-  final String description;
-
-  const ChecklistItem({
-    required this.icon,
-    required this.title,
-    required this.description,
   });
 }
 
 class OnboardingData {
-  static final List<OnboardingPage> pages = [
-    const OnboardingPage(
-      title: 'Take Your Exam on Your Device',
-      description:
-          'Smashrite lets you write exams securely on your phone or tablet without internet access.',
-      icon: Icons.phone_android_rounded,
-    ),
-    const OnboardingPage(
-      title: 'No Internet Needed',
-      description:
-          'Your exam runs on a secure local network. Answers are saved automatically even if connection drops.',
-      icon: Icons.wifi_off_rounded,
-    ),
-    const OnboardingPage(
-      title: 'Exam Rules Apply',
-      description:
-          'Switching apps, screenshots, or screen recording are not allowed. These leads to exam violations and prompt consequences.',
-      icon: Icons.verified_user_rounded,
+  static const List<OnboardingPage> pages = [
+    OnboardingPage(
+      icon: Icons.signal_wifi_off_rounded,
+      title: 'Turn off mobile data',
+      body:
+          'This app works WITHOUT the internet. Turn off mobile data and connect only to the exam hotspot. Ask your digital exam administrator which one to connect to.',
     ),
     OnboardingPage(
-      title: 'You\'re Almost Ready',
-      description: 'Please ensure you have the following ready before starting:',
-      icon: Icons.celebration_rounded,
-      checklist: [
-        const ChecklistItem(
-          icon: Icons.battery_charging_full_rounded,
-          title: 'Battery charged:',
-          description:
-              'Please ensure your device is at least 40% charged to avoid interruptions. 70% is recommended.',
-        ),
-        const ChecklistItem(
-          icon: Icons.vpn_key_rounded,
-          title: 'Access code ready:',
-          description: 'Have your access code available as you\'ll need it to login.',
-        ),
-        const ChecklistItem(
-          icon: Icons.wifi_off_rounded, 
-          title: 'No internet connection:',
-          description: 'Make sure this device is NOT connected to the internet.',
-        ),
-      ],
+      icon: Icons.battery_charging_full_rounded,
+      title: 'Charge your phone',
+      body:
+          'Your battery must be at least 40% to start the exam. If your phone shuts down mid-exam, your session may be lost.',
+    ),
+    OnboardingPage(
+      icon: Icons.security_rounded,
+      title: 'Stay in the app',
+      body:
+          "Leaving/Switching the app during the exam is detected and it's a violation. Keep the app open until you submit.",
+    ),
+    OnboardingPage(
+      icon: Icons.check_circle_rounded,
+      title: "You're ready",
+      body:
+          "Follow the invigilator's instructions. Also report any app issue immediately, rather than trying to solve it yourself.",
     ),
   ];
 }

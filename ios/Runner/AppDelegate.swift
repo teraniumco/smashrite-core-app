@@ -207,6 +207,11 @@ import Flutter
                 self.openStorageSettings()
                 print("✅ iOS: Opened storage settings (general)")
                 result(true)
+
+            case "openMobileDataSettings":
+                self.openMobileDataSettings()
+                print("✅ iOS: Opened settings for mobile data")
+                result(true)
                 
             default:
                 result(FlutterMethodNotImplemented)
@@ -333,6 +338,20 @@ import Flutter
                 print(success
                     ? "✅ iOS: Opened settings (navigate to WiFi manually)"
                     : "❌ iOS: Failed to open settings"
+                )
+            }
+        }
+    }
+
+
+    private func openMobileDataSettings() {
+        // iOS has no public deep-link directly to the Cellular/Mobile Data page.
+        // Opening the app settings URL is the only App Store-safe option.
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url, options: [:]) { success in
+                print(success
+                    ? "✅ iOS: Opened Settings — user must navigate to Cellular"
+                    : "❌ iOS: Failed to open Settings"
                 )
             }
         }

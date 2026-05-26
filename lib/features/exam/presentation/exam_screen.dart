@@ -3,7 +3,9 @@ import 'dart:io' show exit;
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smashrite/core/constants/app_constants.dart';
 import 'package:smashrite/core/services/network_monitor_service.dart';
+import 'package:smashrite/core/storage/storage_service.dart';
 import 'package:smashrite/core/theme/app_theme.dart';
 import 'package:smashrite/core/services/security_service.dart';
 import 'package:smashrite/features/exam/data/models/exam_session.dart';
@@ -23,6 +25,7 @@ import 'package:smashrite/features/server_connection/data/services/server_connec
 import 'package:smashrite/core/services/security_globals.dart';
 import 'package:smashrite/features/exam/widgets/question_image.dart';
 import 'package:smashrite/core/services/kiosk_service.dart';
+import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
 
 class ExamScreen extends ConsumerStatefulWidget {
   const ExamScreen({super.key});
@@ -42,6 +45,13 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
   static final ServerConnectionService _serverService =
       ServerConnectionService();
   static ExamServer? _currentServer;
+
+  // ── Coach mark tour ──────────────────────────────────────────────────
+  final _gridIconKey    = GlobalKey();
+  final _timerKey       = GlobalKey();
+  final _submitKey      = GlobalKey();
+  final _swipeHintKey   = GlobalKey();
+  TutorialCoachMark?    _examTour;
 
   @override
   void initState() {
@@ -151,6 +161,8 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
         setState(() {
           _isLoading = false;
         });
+        // Show feature tour on first ever run
+        WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowTour());
       }
     } catch (e) {
       debugPrint('❌ Exam initialization failed: $e');
@@ -1230,27 +1242,27 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
               if (!connectionStatus.isConnected) _buildDisconnectionBanner(),
 
               Expanded(
-                child: PageView.builder(
-                  controller: _pageController,
-                  onPageChanged: (index) {
-                    setState(() {
-                      _currentQuestionIndex = index;
-                    });
-                    // Sync current question page index with provider
-                    // ref.read(examProvider.notifier).setCurrentQuestionIndex(index);
-
-                    // Also set current question id in provider and SecurityService
-                    final questionId = examSession.questions[index].id;
-                    ref.read(examProvider.notifier).setCurrentQuestionId(questionId);
-                  },
-                  itemCount: examSession.questions.length,
-                  itemBuilder: (context, index) {
-                    return _buildQuestionPage(
-                      examSession.questions[index],
-                      index,
-                      examSession.questions.length,
-                    );
-                  },
+                child: Stack(
+                  children: [
+                    PageView.builder(
+                      controller: _pageController,
+                      onPageChanged: (index) {
+                        setState(() {
+                          _currentQuestionIndex = index;
+                        });
+                        final questionId = examSession.questions[index].id;
+                        ref.read(examProvider.notifier).setCurrentQuestionId(questionId);
+                      },
+                      itemCount: examSession.questions.length,
+                      itemBuilder: (context, index) {
+                        return _buildQuestionPage(
+                          examSession.questions[index],
+                          index,
+                          examSession.questions.length,
+                        );
+                      },
+                    ),
+                  ],
                 ),
               ),
 
@@ -1284,6 +1296,7 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
       backgroundColor: Colors.white,
       elevation: 0,
       leading: IconButton(
+        key: _gridIconKey,
         icon: const Icon(Icons.grid_view, color: Colors.black87),
         onPressed: _showQuestionNavigator,
       ),
@@ -1296,20 +1309,15 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
           return Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-
-              // Security status - icon only on small screens
               SecurityStatusWidget(compact: isSmallScreen),
               const SizedBox(width: 6),
-
-              // Connection status - icon only on small screens
               ConnectionStatusBadge(
                 isConnected: connectionStatus.isConnected,
                 compact: isSmallScreen,
               ),
               const SizedBox(width: 6),
-              
-              // Timer - always flexible
               Flexible(
+                key: _timerKey,
                 child: ExamTimer(
                   duration: examSession.duration,
                   onTimeUpdate: (remaining) {
@@ -1326,6 +1334,7 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
         Padding(
           padding: const EdgeInsets.only(right: 8),
           child: ElevatedButton(
+            key: _submitKey,
             onPressed: _showSubmitConfirmation,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
@@ -1376,6 +1385,7 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Center(
+            key: _swipeHintKey,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: const [
@@ -1605,4 +1615,255 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
           ),
     );
   }
+
+
+
+  // ============================================================================
+  // EXAM FEATURE TOUR
+  // ============================================================================
+
+  Future<void> _maybeShowTour() async {
+    final hasSeen =
+        StorageService.get<bool>(AppConstants.hasSeenExamTour, defaultValue: false) ??
+        false;
+    if (hasSeen || !mounted) return;
+
+    await Future.delayed(const Duration(milliseconds: 700));
+    if (!mounted) return;
+
+    _examTour = TutorialCoachMark(
+      targets: _buildTourTargets(),
+      colorShadow: const Color(0xFF0F2B6D),
+      opacityShadow: 0.88,
+      paddingFocus: 10,
+      alignSkip: Alignment.bottomRight,
+
+      // ── Custom skip widget with proper SafeArea padding ───────────
+      skipWidget: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 24, right: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Color(0xFFFF7A00),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Color(0xFFFF7A00)),
+            ),
+            child: const Text(
+              "SKIP & DONT'T SHOW AGAIN",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+        ),
+      ),
+
+      onFinish: () {
+        // StorageService.save(AppConstants.hasSeenExamTour, true);
+      },
+      onSkip: () {
+        StorageService.save(AppConstants.hasSeenExamTour, true);
+        return true;
+      },
+    )..show(context: context);
+  }
+
+
+
+
+  List<TargetFocus> _buildTourTargets() {
+    return [
+      // ── 1. Question Navigator ─────────────────────────────────────
+      TargetFocus(
+        identify: 'grid_icon',
+        keyTarget: _gridIconKey,
+        shape: ShapeLightFocus.Circle,
+        contents: [
+          TargetContent(
+            align: ContentAlign.bottom,
+            builder: (_, controller) => _tourCard(
+              icon: Icons.grid_view_rounded,
+              title: 'Question Navigator',
+              body: 'Tap here to see all your questions at a glance '
+                  'and jump to any one instantly.',
+              isLast: false,
+              onNext: () => controller.next(),
+            ),
+          ),
+        ],
+      ),
+
+
+      // ── 2. Exam Timer ─────────────────────────────────────────────
+      TargetFocus(
+        identify: 'exam_timer',
+        keyTarget: _timerKey,
+        shape: ShapeLightFocus.RRect,
+        contents: [
+          TargetContent(
+            align: ContentAlign.bottom,
+            builder: (_, controller) => _tourCard(
+              icon: Icons.timer_rounded,
+              title: 'Exam Timer',
+              body: 'Your remaining time counts down here. '
+                  'The exam auto-submits the moment it reaches zero.',
+              isLast: false,
+              onNext: () => controller.next(),
+            ),
+          ),
+        ],
+      ),
+
+      // ── 3. Swipe Navigation ───────────────────────────────────────
+      TargetFocus(
+        identify: 'swipe_hint',
+        keyTarget: _swipeHintKey,
+        shape: ShapeLightFocus.RRect,
+        contents: [
+          TargetContent(
+            align: ContentAlign.bottom,
+            builder: (_, controller) => _tourCard(
+              icon: Icons.swipe_rounded,
+              title: 'Navigate Questions',
+              body: 'Swipe left or right to move between questions — '
+                  'answer them in any order. Use the flag button below '
+                  'each question to mark ones you want to revisit.',
+              isLast: false,
+              onNext: () => controller.next(),
+            ),
+          ),
+        ],
+      ),
+
+      // ── 4. Submit Button ──────────────────────────────────────────
+      TargetFocus(
+        identify: 'submit_btn',
+        keyTarget: _submitKey,
+        shape: ShapeLightFocus.RRect,
+        contents: [
+          TargetContent(
+            align: ContentAlign.bottom,
+            builder: (_, controller) => _tourCard(
+              icon: Icons.send_rounded,
+              title: 'Submit Your Exam',
+              body: 'Tap here when you\'re done. '
+                  'You\'ll review your answers and confirm before the exam is submitted.',
+              isLast: true,
+              onNext: () => controller.next(), // on last step, next() triggers onFinish
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
+
+
+  Widget _tourCard({
+    required IconData icon,
+    required String title,
+    required String body,
+    required bool isLast,
+    required VoidCallback onNext,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 24,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Header ───────────────────────────────────────────────
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F2B6D).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: const Color(0xFF0F2B6D), size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0F2B6D),
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 10),
+
+          // ── Body ─────────────────────────────────────────────────
+          Text(
+            body,
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.textPrimary,
+              height: 1.55,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          
+
+          const SizedBox(height: 16),
+
+          // ── Next / Finish button ──────────────────────────────────
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: onNext,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isLast
+                    ? const Color(0xFFFF7A00)   // orange on last step
+                    : const Color(0xFF0F2B6D),  // deep blue on intermediate steps
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                elevation: 0,
+              ),
+              child: Text(
+                isLast ? 'Finish' : 'Next',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+
+
+
+
+
 }
