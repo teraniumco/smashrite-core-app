@@ -13,6 +13,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:smashrite/core/services/network_monitor_service.dart';
 import 'package:smashrite/core/services/kiosk_service.dart';
+import 'package:smashrite/features/viva/data/providers/viva_provider.dart';
 
 final syncStatusProvider = StateProvider<SyncStatus>((ref) => SyncStatus.idle);
 
@@ -184,7 +185,10 @@ class ExamNotifier extends StateNotifier<ExamSession?> {
         flaggedQuestions: flaggedQuestions,
       );
 
-      // 8. Setup ALL security callbacks (Native + FreeRASP)
+      // 8. Discover sections for the section switcher (fire and forget)
+      ref.read(vivaProvider.notifier).loadSections();
+
+      // 9. Setup ALL security callbacks (Native + FreeRASP)
       _setupSecurityCallbacks();
 
       // Set exam attempt for security violation tracking
@@ -193,13 +197,13 @@ class ExamNotifier extends StateNotifier<ExamSession?> {
       );
       debugPrint('✅ Exam attempt set for security tracking: $attemptId');
 
-      // 9. Initialize network monitoring with server URL
+      // 10. Initialize network monitoring with server URL
       await NetworkMonitorService.initialize(
         serverUrl: ExamService.dio.options.baseUrl,
       );
       debugPrint('📡 Network monitoring initialized');
 
-      // 10. Start background sync with dynamic interval based on exam duration
+      // 11. Start background sync with dynamic interval based on exam duration
       final durationMinutes = (remainingSeconds / 60).ceil();
       AnswerSyncService.startBackgroundSync(
         (status) {
@@ -209,7 +213,7 @@ class ExamNotifier extends StateNotifier<ExamSession?> {
             durationMinutes, // Pass exam duration for smart sync interval
       );
 
-      // 11. Enable kiosk mode for the exam
+      // 12. Enable kiosk mode for the exam
       debugPrint('🔒 Enabling kiosk mode...');
       final kioskEnabled = await KioskService.enableKioskMode();
       if (!kioskEnabled) {

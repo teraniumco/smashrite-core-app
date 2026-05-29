@@ -1,5 +1,13 @@
 package com.smashrite.core
 
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509TrustManager
+import java.security.KeyStore
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
@@ -55,6 +63,7 @@ class MainActivity: FlutterActivity() {
     private var settingsChannel: MethodChannel? = null
     
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSmashriteTrustManager()
         // Edge-to-edge: let content draw behind system bars
         WindowCompat.setDecorFitsSystemWindows(window, false)
         super.onCreate(savedInstanceState)
@@ -137,6 +146,63 @@ class MainActivity: FlutterActivity() {
             }
         }
     }
+
+
+
+    // ========== Smashrite TrustManager (Android 10/11 CA fix) ==========
+
+    private fun installSmashriteTrustManager() {
+        try {
+            // Load CA cert from Flutter assets
+            val caInput = assets.open("flutter_assets/assets/certs/smashrite_ca.crt")
+            val ca = CertificateFactory.getInstance("X.509").generateCertificate(caInput)
+            caInput.close()
+
+            android.util.Log.d("SmashriteTLS", "✅ CA loaded: ${(ca as X509Certificate).subjectDN}")
+
+            // Build a KeyStore containing only our CA
+            val keyStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+                load(null, null)
+                setCertificateEntry("smashrite_ca", ca)
+            }
+
+            // Build a TrustManager from that KeyStore
+            val tmf = TrustManagerFactory.getInstance(
+                TrustManagerFactory.getDefaultAlgorithm()
+            ).apply { init(keyStore) }
+
+            // Install it as the default for all HttpsURLConnection calls
+            val sslContext = SSLContext.getInstance("TLS").apply {
+                init(null, tmf.trustManagers, null)
+            }
+            HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.socketFactory)
+            HttpsURLConnection.setDefaultHostnameVerifier { hostname, session ->
+                // Accept any hostname whose cert was signed by our CA.
+                // The TrustManager above already enforces CA trust —
+                // hostname flexibility is intentional for LAN IP/name variation.
+                try {
+                    val peerCerts = session.peerCertificates
+                    val leaf = peerCerts[0] as X509Certificate
+                    // Verify the leaf cert was signed by our CA
+                    leaf.verify(ca.publicKey)
+                    android.util.Log.d("SmashriteTLS", "✅ Hostname verified via CA: $hostname")
+                    true
+                } catch (e: Exception) {
+                    android.util.Log.e("SmashriteTLS", "❌ Hostname verify failed: $hostname — ${e.message}")
+                    false
+                }
+            }
+
+            android.util.Log.d("SmashriteTLS", "✅ TrustManager installed globally (Android ${Build.VERSION.SDK_INT})")
+
+        } catch (e: Exception) {
+            // Log but don't crash — Dart's own SecurityContext is still the primary
+            // TLS layer for Dio. This is a platform-level belt-and-suspenders fix.
+            android.util.Log.e("SmashriteTLS", "⚠️ TrustManager install failed: ${e.message}", e)
+        }
+    }
+
+
     
     // ========== Screenshot Detection (No permissions required) ==========
 

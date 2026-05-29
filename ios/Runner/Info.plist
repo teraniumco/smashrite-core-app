@@ -46,7 +46,7 @@
 		<key>UIApplicationSupportsIndirectInputEvents</key>
 		<true/>
 		<key>NSCameraUsageDescription</key>
-		<string>We need camera access to scan QR codes for server connection</string>
+		<string>Camera is used to scan QR codes for server connection and to photograph handwritten exam answers during theory assessments.</string>
 		<key>UIStatusBarHidden</key>
 		<true/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>

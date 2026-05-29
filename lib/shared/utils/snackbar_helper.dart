@@ -4,7 +4,7 @@ void showTopSnackBar(
   BuildContext context, {
   required String message,
   Color backgroundColor = Colors.green,
-  Duration duration = const Duration(seconds: 5),
+  Duration duration = const Duration(seconds: 8),
 }) {
   final overlay = Overlay.of(context);
   if (overlay == null) return;

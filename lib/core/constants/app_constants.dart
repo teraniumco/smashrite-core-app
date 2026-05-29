@@ -11,6 +11,8 @@ class AppConstants {
   static const String examViolationStatus = 'exam_violation_status';
   static const String examViolationDetails = 'exam_violation_details';
   static const String hasSeenExamTour = 'has_seen_exam_tour';
+  static const String vivaActiveSectionId  = 'viva_active_section_id';
+  static const String vivaSectionState     = 'viva_section_state';
 
   // Student Info
   static const String studentId = 'student_id';

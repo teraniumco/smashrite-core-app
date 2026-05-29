@@ -188,6 +188,7 @@ class _LoginScreenState extends State<LoginScreen> {
             title: const Text('Disconnect from Server?'),
             content: const Text(
               'You will need to reconnect to access exams. Continue?',
+              style: TextStyle(color: AppColors.textPrimary),
             ),
             actions: [
               TextButton(
@@ -282,7 +283,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 Text(
                   result['message'] ??
                       'You have an active session on another device',
-                  style: const TextStyle(fontSize: 15),
+                  style: const TextStyle(fontSize: 15, color: AppColors.textPrimary),
                 ),
                 if (activeSession != null) ...[
                   const SizedBox(height: 16),
@@ -321,7 +322,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   'You can force logout from that device to continue here.',
                   style: TextStyle(
                     fontSize: 13,
-                    color: AppColors.textSecondary,
+                    color: AppColors.textPrimary,
                   ),
                 ),
               ],

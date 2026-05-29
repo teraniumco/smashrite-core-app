@@ -25,7 +25,10 @@ import 'package:smashrite/features/server_connection/data/services/server_connec
 import 'package:smashrite/core/services/security_globals.dart';
 import 'package:smashrite/features/exam/widgets/question_image.dart';
 import 'package:smashrite/core/services/kiosk_service.dart';
+import 'package:smashrite/features/viva/data/providers/viva_provider.dart';
 import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
+import 'package:smashrite/features/viva/data/providers/viva_provider.dart';
+import 'package:smashrite/features/viva/data/models/viva_section.dart';
 
 class ExamScreen extends ConsumerStatefulWidget {
   const ExamScreen({super.key});
@@ -41,6 +44,8 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
   bool _isLoading = true;
   String? _errorMessage;
   bool _isSubmitting = false;
+
+  ExamStatus? _lastExamStatus;
 
   static final ServerConnectionService _serverService =
       ServerConnectionService();
@@ -157,6 +162,10 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
       // Start exam
       await ref.read(examProvider.notifier).startExam();
 
+
+      // Fire and forget — load sections in parallel
+      ref.read(vivaProvider.notifier).loadSections();
+
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -173,6 +182,13 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
           _errorMessage = _extractErrorMessage(e);
         });
       }
+    }
+  }
+
+
+  void _openVivaSection(VivaSection section) async {
+    if (mounted) {
+      context.push('/viva', extra: section.id);
     }
   }
 
@@ -574,9 +590,9 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
     _pageController.dispose();
     WidgetsBinding.instance.removeObserver(this);
 
-    final examState = ref.read(examProvider);
-    if (examState?.status != ExamStatus.submitted &&
-        examState?.status != ExamStatus.autoSubmitted) {
+    // Use cached status — never ref inside dispose()
+    if (_lastExamStatus != ExamStatus.submitted &&
+        _lastExamStatus != ExamStatus.autoSubmitted) {
       debugPrint(
         '[!! WARNING !!] Exam screen disposed without submission - stopping monitoring',
       );
@@ -1129,6 +1145,7 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
 
     final examSession = ref.watch(examProvider);
     final connectionStatus = ref.watch(connectionStatusProvider);
+    _lastExamStatus = examSession?.status; 
 
     // Listen for app termination due to violations
     // This will show a modal before the app exits
@@ -1239,6 +1256,19 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
           appBar: _buildAppBar(examSession, connectionStatus),
           body: Column(
             children: [
+
+              // ── THEORY SECTION SWITCHER ──────────────────────────────────────────
+              Consumer(
+                builder: (context, ref, _) {
+                  final sections = ref.watch(vivaSectionsProvider);
+                  final subjective = sections.where((s) => s.isSubjective).toList();
+                  if (subjective.isEmpty) return const SizedBox.shrink();
+                  return _SectionSwitcherBar(
+                    onTheoryTap: () => _openVivaSection(subjective.first),
+                  );
+                },
+              ),
+
               if (!connectionStatus.isConnected) _buildDisconnectionBanner(),
 
               Expanded(
@@ -1866,4 +1896,90 @@ class _ExamScreenState extends ConsumerState<ExamScreen>
 
 
 
+}
+
+
+
+class _SectionSwitcherBar extends StatelessWidget {
+  final VoidCallback onTheoryTap;
+ 
+  const _SectionSwitcherBar({required this.onTheoryTap});
+ 
+  static const _deepBlue = Color(0xFF0F2B6D);
+  static const _orange   = Color(0xFFFF7A00);
+ 
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          bottom: BorderSide(color: Colors.grey.shade100),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Active: Objective tab
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: _deepBlue,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.check_box_rounded, color: Colors.white, size: 14),
+                SizedBox(width: 6),
+                Text(
+                  'Objective',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+ 
+          const SizedBox(width: 8),
+ 
+          // Inactive: Theory tab
+          GestureDetector(
+            onTap: onTheoryTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: _deepBlue.withOpacity(0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.edit_note_rounded,
+                      color: _deepBlue.withOpacity(0.7), size: 14),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Subjective',
+                    style: TextStyle(
+                      color: _deepBlue.withOpacity(0.7),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right_rounded,
+                      color: _deepBlue.withOpacity(0.5), size: 14),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

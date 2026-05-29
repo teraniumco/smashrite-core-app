@@ -16,6 +16,7 @@ import 'package:smashrite/features/security/presentation/device_mismatch_screen.
 import 'package:smashrite/core/services/security_service.dart';
 import 'package:smashrite/features/app_version/presentation/screens/app_version_check_screen.dart';
 import 'package:smashrite/features/wifi_connect/presentation/wifi_connect_screen.dart';
+import 'package:smashrite/features/viva/presentation/screens/viva_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -98,6 +99,40 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/exam',
         builder: (context, state) => const ExamScreen(),
       ),
+
+      GoRoute(
+        path: '/viva',
+        pageBuilder: (context, state) {
+          final sectionId = state.extra as int?;
+          if (sectionId == null) {
+            // Safety fallback — should never happen in normal flow
+            return CustomTransitionPage(
+              key: state.pageKey,
+              child: const Scaffold(
+                body: Center(child: Text('Section not found')),
+              ),
+              transitionsBuilder: (_, a, __, child) =>
+                  FadeTransition(opacity: a, child: child),
+            );
+          }
+          return CustomTransitionPage(
+            key: state.pageKey,
+            child: VivaScreen(sectionId: sectionId),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              // Slide in from the right — navigating deeper
+              const begin = Offset(1.0, 0.0);
+              const end   = Offset.zero;
+              final tween = Tween(begin: begin, end: end)
+                  .chain(CurveTween(curve: Curves.easeInOut));
+              return SlideTransition(
+                position: animation.drive(tween),
+                child: child,
+              );
+            },
+          );
+        },
+      ),
+
             
       GoRoute(
         path: '/exam-submitted',

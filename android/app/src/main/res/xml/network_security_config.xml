@@ -1,8 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
-            <certificates src="system"/>
-            <certificates src="@raw/smashrite_ca"/>
+            <!-- Trust the system CAs -->
+            <certificates src="system" />
+            <!-- Also trust your Smashrite CA -->
+            <certificates src="@raw/smashrite_ca" />
         </trust-anchors>
     </base-config>
 </network-security-config>

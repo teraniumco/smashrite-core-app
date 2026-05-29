@@ -107,41 +107,69 @@ class _QuestionNavigatorModalState extends State<QuestionNavigatorModal> {
           // ── Stat cards ────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: _StatCard(
-                    label: 'Answered',
-                    value: answeredCount,
-                    color: Colors.green.shade600,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _StatCard(
+                        label: 'Answered',
+                        value: answeredCount,
+                        color: Colors.green.shade600,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _StatCard(
+                        label: 'Flagged',
+                        value: flaggedCount,
+                        color: _orange,
+                        isFilterActive: _showFlaggedOnly,
+                        isFilterable: flaggedCount > 0,
+                        onTap: flaggedCount > 0
+                            ? () => setState(
+                                  () => _showFlaggedOnly = !_showFlaggedOnly,
+                                )
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _StatCard(
+                        label: 'Unanswered',
+                        value: unansweredCount,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                // Flagged card is the filter trigger
-                Expanded(
-                  child: _StatCard(
-                    label: 'Flagged',
-                    value: flaggedCount,
-                    color: _orange,
-                    isFilterActive: _showFlaggedOnly,
-                    isFilterable: flaggedCount > 0,
-                    onTap: flaggedCount > 0
-                        ? () => setState(
-                            () => _showFlaggedOnly = !_showFlaggedOnly)
-                        : null,
+
+                const SizedBox(height: 10),
+
+                if (flaggedCount > 0)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.touch_app_rounded,
+                        size: 14,
+                        color: Colors.grey.shade500,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Tap the Flagged card to view flagged questions',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _StatCard(
-                    label: 'Unanswered',
-                    value: unansweredCount,
-                    color: Colors.grey.shade500,
-                  ),
-                ),
               ],
             ),
           ),
+
 
           // ── Active filter banner ──────────────────────────────────
           AnimatedSwitcher(

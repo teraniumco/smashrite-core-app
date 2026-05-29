@@ -40,11 +40,18 @@ class SmashriteSslContext {
         // The SecurityContext already rejected certs from foreign CAs —
         // if we reach here, it means the cert IS from our CA but the
         // hostname doesn't match Smashrite local domains.
-        debugPrint(
-          '[SSL] REJECTED — cert issuer is not Smashrite CA. '
-          'Host: $host:$port | Issuer: ${cert.issuer}',
-        );
+        debugPrint('[SSL] ❌ Bad cert callback fired');
+        debugPrint('[SSL]   Host: $host:$port');
+        debugPrint('[SSL]   Issuer: ${cert.issuer}');
+        debugPrint('[SSL]   Subject: ${cert.subject}');
+        debugPrint('[SSL]   Start: ${cert.startValidity}');
+        debugPrint('[SSL]   End: ${cert.endValidity}');
         return false; // ❌ wrong local Smashrite domain — reject
+        // debugPrint(
+        //   '[SSL] REJECTED — cert issuer is not Smashrite CA. '
+        //   'Host: $host:$port | Issuer: ${cert.issuer}',
+        // );
+        // return false; 
       };
 
       return client;

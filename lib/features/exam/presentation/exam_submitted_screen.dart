@@ -211,6 +211,7 @@ class _ExamSubmittedScreenState extends State<ExamSubmittedScreen> {
                         fontSize: 18,
                         color: AppColors.textPrimary,
                         height: 1.5,
+                        fontWeight: FontWeight.w500,
                       ),
                       textAlign: TextAlign.center,
                     ),
@@ -235,7 +236,7 @@ class _ExamSubmittedScreenState extends State<ExamSubmittedScreen> {
                           _buildInfoRow(
                             icon: Icons.cloud_done,
                             label: 'Status',
-                            value: 'Synced to server',
+                            value: 'Synced to exam server',
                             valueColor: Colors.green.shade700,
                           ),
                         ],
