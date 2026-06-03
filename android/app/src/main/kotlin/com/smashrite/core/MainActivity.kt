@@ -26,6 +26,10 @@ import io.flutter.plugin.common.MethodChannel
 import androidx.core.view.WindowCompat
 
 class MainActivity: FlutterActivity() {
+    // ========== mDNS Resolution ==========
+    private val MDNS_CHANNEL = "com.smashrite.core/mdns"
+    private var mdnsChannel: MethodChannel? = null
+
     // ========== Screenshot Detection ==========
     private val VIOLATIONS_CHANNEL = "com.smashrite.core/violations"
     private var screenshotCount = 0
@@ -145,6 +149,38 @@ class MainActivity: FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // ========== mDNS Channel ==========
+        MdnsResolver.acquireMulticastLock(this)
+        mdnsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MDNS_CHANNEL)
+        mdnsChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "resolveHost" -> {
+                    val hostname = call.argument<String>("hostname")
+                        ?: return@setMethodCallHandler result.error("INVALID_ARG", "hostname required", null)
+                    Thread {
+                        val ip = MdnsResolver.resolve(hostname)
+                        runOnUiThread {
+                            if (ip != null) result.success(ip)
+                            else result.error("NOT_FOUND", "mDNS resolution failed for $hostname", null)
+                        }
+                    }.start()
+                }
+                "resolveHosts" -> {
+                    // Batch resolve — returns Map<hostname, ip|null>
+                    @Suppress("UNCHECKED_CAST")
+                    val hostnames = call.argument<List<String>>("hostnames")
+                        ?: return@setMethodCallHandler result.error("INVALID_ARG", "hostnames list required", null)
+                    Thread {
+                        val results = hostnames.associateWith { MdnsResolver.resolve(it) }
+                        runOnUiThread { result.success(results) }
+                    }.start()
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+
     }
 
 
@@ -441,6 +477,7 @@ class MainActivity: FlutterActivity() {
     }
     
     override fun onDestroy() {
+        MdnsResolver.releaseMulticastLock()
         super.onDestroy()
         unregisterScreenshotDetection()
         if (isKioskModeEnabled) disableKioskMode()

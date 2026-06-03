@@ -1,62 +1,61 @@
+// smashrite_ssl_context.dart — final clean version
 import 'dart:io';
-import 'package:flutter/services.dart';
+import 'dart:typed_data';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:smashrite/core/services/mdns_resolver.dart';
 
 class SmashriteSslContext {
-  SmashriteSslContext._();
+  static Future<void> applyTo(Dio dio) async {
+    final certBytes = await rootBundle.load('assets/certs/smashrite_ca.crt');
+    final caCert = certBytes.buffer.asUint8List();
 
-  static SecurityContext? _context;
+    dio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final ctx = SecurityContext(withTrustedRoots: false);
+        ctx.setTrustedCertificatesBytes(caCert);
+        final client = HttpClient(context: ctx);
 
-  /// Returns a SecurityContext that trusts ONLY the Smashrite CA.
-  /// Built once and cached.
-  static Future<SecurityContext> get() async {
-    if (_context != null) return _context!;
+        client.connectionFactory =
+            (Uri uri, String? proxyHost, int? proxyPort) async {
+          final host = uri.host;
+          final port = uri.port > 0 ? uri.port : 443;
+          String connectHost = host;
 
-    final caBytes = await rootBundle.load('assets/certs/smashrite_ca.crt');
-    _context = SecurityContext(withTrustedRoots: false);
-    _context!.setTrustedCertificatesBytes(caBytes.buffer.asUint8List());
+          if (host.endsWith('.local')) {
+            try {
+              connectHost = await MdnsResolver.resolve(host);
+              debugPrint('[SSL/mDNS] TCP→$connectHost  SNI=$host');
+            } catch (e) {
+              debugPrint('[SSL/mDNS] Resolve failed: $e');
+            }
+          }
 
-    debugPrint('[SSL] SmashriteSslContext built — CA loaded.');
-    return _context!;
-  }
+          // Step 1: plain TCP to the resolved IP
+          final tcpSocket = await Socket.connect(connectHost, port);
 
-  /// Apply a CA-pinned, hostname-flexible HttpClient to [dio].
-  ///
-  /// CA validation is enforced by the SecurityContext.
-  /// Hostname verification is relaxed for LAN servers — the cert's
-  /// issuer is checked instead, ensuring only Smashrite-CA-signed
-  /// certs are accepted regardless of which IP the server is on.
-  static Future<void> applyTo(dynamic dio) async {
-    final context = await get();
+          // Step 2: TLS upgrade — host: sets SNI to the .local name
+          // SecureSocket extends Socket, so it satisfies ConnectionTask<Socket>
+          final secureSocket = await SecureSocket.secure(
+            tcpSocket,
+            host: host,               // ← SNI = smashrite-server-1.local ✅
+            context: ctx,
+            onBadCertificate: (cert) {
+              debugPrint('[SSL] Rejected: ${cert.subject} for $host');
+              return false;
+            },
+          );
 
-    (dio.httpClientAdapter as dynamic).createHttpClient = () {
-      final client = HttpClient(context: context);
+          return ConnectionTask.fromSocket(
+            Future.value(secureSocket),
+            () => secureSocket.destroy(),
+          );
+        };
 
-      client.badCertificateCallback = (
-        X509Certificate cert,
-        String host,
-        int port,
-      ) {
-        // The SecurityContext already rejected certs from foreign CAs —
-        // if we reach here, it means the cert IS from our CA but the
-        // hostname doesn't match Smashrite local domains.
-        debugPrint('[SSL] ❌ Bad cert callback fired');
-        debugPrint('[SSL]   Host: $host:$port');
-        debugPrint('[SSL]   Issuer: ${cert.issuer}');
-        debugPrint('[SSL]   Subject: ${cert.subject}');
-        debugPrint('[SSL]   Start: ${cert.startValidity}');
-        debugPrint('[SSL]   End: ${cert.endValidity}');
-        return false; // ❌ wrong local Smashrite domain — reject
-        // debugPrint(
-        //   '[SSL] REJECTED — cert issuer is not Smashrite CA. '
-        //   'Host: $host:$port | Issuer: ${cert.issuer}',
-        // );
-        // return false; 
-      };
-
-      return client;
-    };
-
-    debugPrint('[SSL] Secure adapter applied.');
+        return client;
+      },
+    );
   }
 }

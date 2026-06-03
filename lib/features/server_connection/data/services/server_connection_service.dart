@@ -5,6 +5,7 @@ import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:smashrite/core/constants/app_constants.dart';
+import 'package:smashrite/core/network/mdns_interceptor.dart';
 import 'package:smashrite/core/storage/storage_service.dart';
 import 'package:smashrite/core/utils/smashrite_ssl_context.dart';
 import '../models/exam_server.dart';
@@ -24,6 +25,8 @@ class SecureDioFactory {
     );
 
     await SmashriteSslContext.applyTo(dio);
+
+    dio.interceptors.add(MdnsInterceptor());
 
     return dio;
   }
@@ -115,6 +118,16 @@ class ServerConnectionService {
       }
     } on DioException catch (e) {
       debugPrint('[API] DioException: ${e.message}');
+
+      // mDNS resolution failure
+      if (e.type == DioExceptionType.connectionError &&
+          e.message?.contains('mDNS') == true) {
+        return {
+          'success': false,
+          'message': 'Could not find server "${server.url}" on the network. '
+              'Ensure you are on the same WiFi as the exam server.',
+        };
+      }
 
       // Surface SSL errors clearly — don't hide them
       if (e.error is HandshakeException) {
